@@ -16,43 +16,52 @@
 //		Output	Best 2 of 160 CLCTs
 //			   +DMB pre-trigger signals
 //------------------------------------------------------------------------------------------------------------------
-// 01/31/07 Initial
-// 02/14/07 Add 1st clct logic
-// 02/20/07 Port from pattern6 back-end version
-// 02/26/07 Phase-align pattern unit pipeline
-// 02/27/07 Reposition pipleline for speed, change to xor LUT for sel, FF version was slower
-// 02/28/07 Add 2nd CLCT
-// 03/02/07 Add pid_thresh_pretrig and dmb_thresh_pretrig
-// 03/07/07 Add layer-or barrel delay
-// 03/12/07 Ifdef temporary 1st stage FFs and DCM
-// 05/08/07 Change pattern numbers 1-9 to 0-8 so lsb now implies bend direction
-// 05/09/07 Remove debug code, shift layer trigger output 1bx earlier to match pre-trig
-// 05/16/07 Mod a/b mulitpler to force initial state and move from lut to 80mhz ff
-// 05/22/07 Reduce to just one vme clct separation parameter
-// 06/13/07 Replace a/b mux flipflops with logic accessible clock signal 
-// 06/14/07 Add serial fanout for a/b mux select signal
-// 06/15/07 Incorporate layer mode as pattern 1, shift clct patterns IDs to the range 2-10
-// 06/18/07 Automatic adjacent mask generation, add layer mode to pattern output
-// 06/19/07 Tune layer delay for clct mux
-// 06/20/07 One more tune session, remove debug code
-// 06/28/07 Shift key layer to ly2, flip patterns top-to-bottom, left-to-right, old ly0 becomes new ly5
-// 07/02/07 Mod pattern_unit.v to match prior ly3 result, reduces fpga usage from 93% to 90%
-// 07/03/07 Mod pid_thresh_pretrig AND logic
-// 07/05/07 Fix adjcfeb logic, extend masks to span full cfeb, increase adjcfeb_dist to 6 bits
-// 07/09/08 Rename thresholds
-// 07/30/08 Add debug mode, add thresh FF inits
-// 07/31/08 Expand reset to purge pattern finder pipelines
-// 08/01/08 Change csc_stagger to be an output, add non-stagger mode as a debug option
-// 08/20/08 Return to programmable csc stagger, add programmable me1a/b hs reversal
-// 08/21/08 Revert once again to ifdef csc stagger, was too slow
-// 08/23/08 Add reverse option for normal cscs
-// 08/28/08 Replace condtional compile switches with csc type code
-// 04/23/09 Mod for ise 10.1i
-// 08/20/09 Add register balancing
-// 08/21/09 Take out register balancing, ise8.2 does not need it
-// 02/04/10 Reverse type b layers
-// 02/10/10 Add type b active feb case
-// 03/19/10 Mod busy hs delimiters for me1a me1b cscs to separate cfeb4
+//	01/31/07 Initial
+//	02/14/07 Add 1st clct logic
+//	02/20/07 Port from pattern6 back-end version
+//	02/26/07 Phase-align pattern unit pipeline
+//	02/27/07 Reposition pipleline for speed, change to xor LUT for sel, FF version was slower
+//	02/28/07 Add 2nd CLCT
+//	03/02/07 Add pid_thresh_pretrig and dmb_thresh_pretrig
+//	03/07/07 Add layer-or barrel delay
+//	03/12/07 Ifdef temporary 1st stage FFs and DCM
+//	05/08/07 Change pattern numbers 1-9 to 0-8 so lsb now implies bend direction
+//	05/09/07 Remove debug code, shift layer trigger output 1bx earlier to match pre-trig
+//	05/16/07 Mod a/b mulitpler to force initial state and move from lut to 80mhz ff
+//	05/22/07 Reduce to just one vme clct separation parameter
+//	06/13/07 Replace a/b mux flipflops with logic accessible clock signal 
+//	06/14/07 Add serial fanout for a/b mux select signal
+//	06/15/07 Incorporate layer mode as pattern 1, shift clct patterns IDs to the range 2-10
+//	06/18/07 Automatic adjacent mask generation, add layer mode to pattern output
+//	06/19/07 Tune layer delay for clct mux
+//	06/20/07 One more tune session, remove debug code
+//	06/28/07 Shift key layer to ly2, flip patterns top-to-bottom, left-to-right, old ly0 becomes new ly5
+//	07/02/07 Mod pattern_unit.v to match prior ly3 result, reduces fpga usage from 93% to 90%
+//	07/03/07 Mod pid_thresh_pretrig AND logic
+//	07/05/07 Fix adjcfeb logic, extend masks to span full cfeb, increase adjcfeb_dist to 6 bits
+//	07/09/08 Rename thresholds
+//	07/30/08 Add debug mode, add thresh FF inits
+//	07/31/08 Expand reset to purge pattern finder pipelines
+//	08/01/08 Change csc_stagger to be an output, add non-stagger mode as a debug option
+//	08/20/08 Return to programmable csc stagger, add programmable me1a/b hs reversal
+//	08/21/08 Revert once again to ifdef csc stagger, was too slow
+//	08/23/08 Add reverse option for normal cscs
+//	08/28/08 Replace condtional compile switches with csc type code
+//	04/23/09 Mod for ise 10.1i
+//	08/20/09 Add register balancing
+//	08/21/09 Take out register balancing, ise8.2 does not need it
+//	02/04/10 Reverse type b layers
+//	02/10/10 Add type b active feb case
+//	03/19/10 Mod busy hs delimiters for me1a me1b cscs to separate cfeb4
+//	08/11/10 Port to ise 12
+//	08/12/10 Fix clct separation ram adr truncation
+//	08/12/10 Add virtex6 ifdef to pattern_unit, replace stop with finish
+//	08/13/10 Change dcm feedback to 1x, ise 12 does not allow 2x
+//	08/13/10 Change sm to non-blocking operators, shorten ascii sm vector
+//	08/16/10 Change sm to start up in purge mode
+//	08/30/10 Mod integer length for types c,d
+//	11/24/10 Replace inferred clct separation ram with library instance, finally ditch that clct_sep_ram_init.dat file
+//	12/01/10 Remove leftover sep ram array
 //-------------------------------------------------------------------------------------------------------------------
 	module pattern_finder
 	(
@@ -245,7 +254,7 @@
 	
 // Debug
 `ifdef DEBUG_PATTERN_FINDER
-	output	[55:0]			purge_sm_dsp;
+	output	[39:0]			purge_sm_dsp;
 	output					reset;
 	output					lock;
 
@@ -265,11 +274,13 @@
 //-------------------------------------------------------------------------------------------------------------------
 // Load global definitions
 //-------------------------------------------------------------------------------------------------------------------
-	`include "tmb2005e_firmware_version.v"
+	`include "firmware_version.v"
 	`ifdef CSC_TYPE_A initial $display ("CSC_TYPE_A=%H",`CSC_TYPE_A); `endif	// Normal   CSC
 	`ifdef CSC_TYPE_B initial $display ("CSC_TYPE_B=%H",`CSC_TYPE_B); `endif	// Reversed CSC
 	`ifdef CSC_TYPE_C initial $display ("CSC_TYPE_C=%H",`CSC_TYPE_C); `endif	// Normal	ME1B reversed ME1A
 	`ifdef CSC_TYPE_D initial $display ("CSC_TYPE_D=%H",`CSC_TYPE_D); `endif	// Reversed ME1B normal   ME1A
+	`ifdef VIRTEX2    initial $display ("VIRTEX2   =%H",`VIRTEX2   ); `endif	// Virtex 2 Mezzanine card
+	`ifdef VIRTEX6    initial $display ("VIRTEX6   =%H",`VIRTEX6   ); `endif	// Virtex 6 Mezzanine card
 
 //-------------------------------------------------------------------------------------------------------------------
 // Debug mode, FF aligns inputs, and has local DLL to generate 2x clock and lac clock
@@ -292,14 +303,14 @@
 	end
 
 // Global clock input buffers
-	IBUFG uibufg4p  (.I(tmb_clock0  ),.O(tmb_clock0_ibufg));	// synthesis attribute LOC of uibufg4p is "AF18"
-	BUFG ugbuftmb1x	(.I(clock_dcm   ),.O(clock           ));	// synthesis attribute LOC of ugbuftmb1x  is "BUFGMUX0P"
-	BUFG ugbuftmb2x	(.I(clock_2x_dcm),.O(clock_2x        ));	// synthesis attribute LOC of ugbuftmb2x  is "BUFGMUX2P"
+	IBUFG uibufg4p  (.I(tmb_clock0  ),.O(tmb_clock0_ibufg));	// synthesis attribute LOC of uibufg4p   is "AF18"
+	BUFG ugbuftmb1x	(.I(clock_dcm   ),.O(clock           ));	// synthesis attribute LOC of ugbuftmb1x is "BUFGMUX0P"
+	BUFG ugbuftmb2x	(.I(clock_2x_dcm),.O(clock_2x        ));	// synthesis attribute LOC of ugbuftmb2x is "BUFGMUX2P"
 	
 // Main TMB DLL generates clocks at 1x=40MHz, 2x=80MHz, and 1/4 =10MHz
 	DCM udcmtmb (
 	.CLKIN		(tmb_clock0_ibufg),
-	.CLKFB		(clock_2x),
+	.CLKFB		(clock),
 	.RST		(1'b0),
 	.DSSEN		(1'b0),
 	.PSINCDEC	(1'b0),
@@ -318,7 +329,10 @@
 	.STATUS		(),
 	.PSDONE		());
 	defparam udcmtmb.STARTUP_WAIT = "TRUE";
-	defparam udcmtmb.CLK_FEEDBACK = "2X";
+	defparam udcmtmb.CLK_FEEDBACK = "1X";
+	`ifdef VIRTEX6
+	defparam udcmtmb.FACTORY_JF   = "F0F0";
+	`endif
 
 // Logic Accessible clock
    FDRSE #(.INIT(1'b0)) u0 (// Initial value of register
@@ -328,6 +342,11 @@
 	.D	(!clock_dcm_90),	// Data input
 	.R	(1'b0),				// Synchronous reset input
 	.S	(1'b0));			// Synchronous set input
+
+// ME1A signal is not used for debug versions of type a or type b
+	`ifdef CSC_TYPE_A wire clct0_is_on_me1a=0; `endif
+	`ifdef CSC_TYPE_B wire clct0_is_on_me1a=0; `endif
+
  `endif
 //-------------------------------------------------------------------------------------------------------------------
 // Stage 4A1: Power  up, reset, and purge
@@ -348,7 +367,7 @@
 
 	always @(posedge clock) begin
 	if      (reset)				purge_cnt <= 0;
-	else if (purge_sm==purge)	purge_cnt <= purge_cnt+1;
+	else if (purge_sm==purge)	purge_cnt <= purge_cnt+1'b1;
 	else						purge_cnt <= 0;
 	end
 
@@ -356,20 +375,20 @@
 	wire purging    = (purge_sm==purge) || reset;
 
 // Pipeline purge state machine
-	initial purge_sm = pass;
+	initial purge_sm = purge;
 
 	always @(posedge clock) begin
-	if(reset) purge_sm = purge;
+	if (reset)              purge_sm <= purge;
 	else begin
 	case (purge_sm)
-	pass:					purge_sm = pass;
-	purge:	if (purge_done)	purge_sm = pass;
+	pass:					purge_sm <= pass;
+	purge:	if (purge_done)	purge_sm <= pass;
 	endcase
 	end
 	end
 
 `ifdef DEBUG_PATTERN_FINDER
-	reg[55:0] purge_sm_dsp;
+	reg[39:0] purge_sm_dsp;
 	always @* begin
 	case (purge_sm)
 	pass:	purge_sm_dsp <= "pass ";
@@ -456,7 +475,7 @@
 //-------------------------------------------------------------------------------------------------------------------
 // Stage 4A2: CSC_TYPE_B Reversed CSC
 //-------------------------------------------------------------------------------------------------------------------
-`elsif CSC_TYPE_B
+`elsif  CSC_TYPE_B
 `define	STAGGER_HS_CSC
 `define CSC_TYPE_A_or_CSC_TYPE_B
 
@@ -678,7 +697,7 @@
 //-------------------------------------------------------------------------------------------------------------------
 `else
 	initial $display ("CSC_TYPE Undefined. Halting.");
-	$stop
+	$finish
 `endif
 
 //-------------------------------------------------------------------------------------------------------------------
@@ -1108,35 +1127,49 @@
 // Stage 6B: Mark key 1/2-strips near the 1st CLCT key as busy to exclude them from 2nd CLCT priority encoding
 //-------------------------------------------------------------------------------------------------------------------
 // Dual-Port RAM with Asynchronous Read: look up busy key region for excluding 2nd clct, port A=VME r/w, port B=readonly
-	reg  [15:0] clct_sep_ram [15:0];	// 16x16 LUT-RAM 
 	wire [3:0]  adra;					// Port A address, set by VME register
 	wire [3:0]  adrb;					// Port B address, set by pattern ID number 0 to 9
 	wire [15:0] rdataa;					// Port A read  data, read by VME register
 	wire [15:0] rdatab;					// Port B read  data, reads out pspan,nspan for this pattern ID number 
 	wire [15:0] wdataa;					// Port A write data, written by VME register, there is no portb wdatab
 
-// Initialize RAM from external file, all internal methods fail in ISE 8.2 and 9.1, alas
-	initial
-	begin	// File format: XXYY where XX=pspan, YY=nspan in hexadecimal, one adr per line, starts adr0
-	$readmemh("clct_sep_ram_init.dat",clct_sep_ram,0,15);
-	end
-
-// Map external port names
 	assign wea    =	clct_sep_ram_we;
 	assign adra   =	clct_sep_ram_adr;
 	assign wdataa = clct_sep_ram_wdata;
+
 	assign clct_sep_ram_rdata = rdataa;
+	assign adrb[3:0]          = hs_pat_s2[MXPIDB-1:0];	// Pattern ID points to nspan,pspan values for this bend angle
 
-// Infer RAM
-	always @(posedge clock) begin				// Write VME data to RAM
-	if (wea) clct_sep_ram[adra] <= wdataa;
+// Instantiate 16adr x 16bit dual port RAM
+// Port A: write/read via VME
+// Port B: readonly pattern ID lookup
+// Initial RAM contents   FFEEDDCCBBAA99887766554433221100
+	parameter nsep = 128'h0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A;
+	parameter psep = 128'h0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A;
+	generate
+	for (i=0; i<=15; i=i+1) begin: sepram
+	RAM16X1D uram16x1d
+	(
+	.WCLK	(clock),		// Port A	Write clock input
+	.WE		(wea),			// Port A	Write enable input
+	.A0		(adra[0]),		// Port A	R/W address[0] input bit
+	.A1		(adra[1]),		// Port A	R/W address[1] input bit
+	.A2		(adra[2]),		// Port A	R/W address[2] input bit
+	.A3		(adra[3]),		// Port A	R/W address[3] input bit
+	.D		(wdataa[i]),	// Port A	Write 1-bit data input
+	.SPO	(rdataa[i]),	// Port A	R/W 1-bit data output for A0-A3
+
+	.DPRA0	(adrb[0]),		// Port B	Read address[0] input bit
+	.DPRA1	(adrb[1]),		// Port B	Read address[1] input bit
+	.DPRA2	(adrb[2]),		// Port B	Read address[2] input bit
+	.DPRA3	(adrb[03]),		// Port B	Read address[3] input bit
+	.DPO	(rdatab[i])		// Port B	Read-only 1-bit data output for DPRA
+	);
+
+	if (i<=7) begin: gena defparam sepram[i].uram16x1d.INIT = {nsep[i+120],nsep[i+112],nsep[i+104],nsep[i+96],nsep[i+88],nsep[i+80],nsep[i+72],nsep[i+64],nsep[i+56],nsep[i+48],nsep[i+40],nsep[i+32],nsep[i+24],nsep[i+16],nsep[i+8],nsep[i-0]}; end
+	else 	  begin: genb defparam sepram[i].uram16x1d.INIT = {psep[i+112],psep[i+104],psep[i+96 ],psep[i+88],psep[i+80],psep[i+72],psep[i+64],psep[i+56],psep[i+48],psep[i+40],psep[i+32],psep[i+24],psep[i+16],psep[i+8 ],psep[i+0],psep[i-8]}; end
 	end
-
-	assign rdataa[15:0] = clct_sep_ram[adra];	// RAM readback for VME	
-
-	assign hs_pid_s2 	= hs_pat_s2[MXPIDB-1:0];	
-	assign adrb[3:0]    = hs_pid_s2;			// Pattern ID points to nspan,pspan values for this bend angle
-	assign rdatab[15:0] = clct_sep_ram[adrb];	// RAM read for 1st clct pattern ID
+	endgenerate
 
 // Extract busy key spans from RAM data
 	wire [7:0] nspan_ram;
@@ -1161,8 +1194,8 @@
 	`ifdef CSC_TYPE_A_or_CSC_TYPE_B
 
 	always @* begin
-	busy_max <= (hs_key_s2 <= 159-pspan) ? hs_key_s2+pspan : 159;	// Limit busy list to range 0-159
-	busy_min <= (hs_key_s2 >= nspan    ) ? hs_key_s2-nspan : 0;
+	busy_max <= (hs_key_s2 <= 159-pspan) ? hs_key_s2+pspan : 8'd159;	// Limit busy list to range 0-159
+	busy_min <= (hs_key_s2 >= nspan    ) ? hs_key_s2-nspan : 8'd0;
 	end
 
 // CSC Type C or D delimiters for excluding 2nd clct span ME1B hs0-127  ME1A hs128-159
@@ -1172,19 +1205,19 @@
 	
 	always @* begin
 	if (clct0_is_on_me1a) begin	// CLCT0 is on ME1A cfeb4, limit blanking region to 128-159
-	busy_max <= (hs_key_s2 <= 159-pspan) ? hs_key_s2+pspan : 159;
-	busy_min <= (hs_key_s2 >= 128+nspan) ? hs_key_s2-nspan : 128;
+	busy_max <= (hs_key_s2 <= 159-pspan) ? hs_key_s2+pspan : 8'd159;
+	busy_min <= (hs_key_s2 >= 128+nspan) ? hs_key_s2-nspan : 8'd128;
 	end
 	else begin					// CLCT0 is on ME1B cfeb0-cfeb3, limit blanking region to 0-127
-	busy_max <= (hs_key_s2 <= 127-pspan) ? hs_key_s2+pspan : 127;
-	busy_min <= (hs_key_s2 >=     nspan) ? hs_key_s2-nspan : 0;
+	busy_max <= (hs_key_s2 <= 127-pspan) ? hs_key_s2+pspan : 8'd127;
+	busy_min <= (hs_key_s2 >=     nspan) ? hs_key_s2-nspan : 8'd0;
 	end
 	end
 
 // CSC Type missing
 	`else
 	initial $display ("CSC_TYPE undefined for 2nd clct delimiters in pattern_finder.v: Halting");
-	$stop
+	$finish
 	`endif
 
 // Latch busy key 1/2-strips for excluding 2nd clct

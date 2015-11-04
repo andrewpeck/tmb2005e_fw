@@ -1,24 +1,27 @@
 `timescale 1ns / 1ps
+//`define VIRTEX6 1	// uncomment for local compile, it is normally set in firmware_version
 //------------------------------------------------------------------------------------------------------------------------
 //	Finds:	  Best matching pattern template and number of layers hit on that pattern for 1 key 1/2-strip
 //	Returns:  Best matching pattern template ID, and number of hits on the pattern
 //
-// 12/19/06 Initial
-// 12/22/06 Change comparison direction
-// 01/05/07 Change to combined 1/2-strip and distrip method
-// 01/09/07 Replace count1s adders with LUT version
-// 01/10/07 Narrow layer inputs to exclude unused 1/2-strips
-// 01/16/07 Change from 15 to 9 patterns
-// 01/18/07 Mod pattern 5 OR
-// 02/22/07 Add pipleline latch
-// 02/27/07 Reposition pipleline for max speed, min area
-// 05/08/07 Change pattern numbers 1-9 to 0-8 so lsb now implies bend direction
-// 05/23/07 Mod pattern 3 ly5 to mirror pattern 2
-// 06/08/07 Remove pipeline stage
-// 06/12/07 Had to revert to pipeline stage, could only achieve 30MHz otherwise
-// 06/15/07 Incorporate layer mode as pattern 1, shift clct patterns IDs to the range 2-10
-// 06/28/07 Shift key layer to ly2, flip patterns top-to-bottom, old ly0 becomes new ly5, left bends become right
-// 07/02/07 Flip pat[i][5:0] to pat[i][0:5] to match prior ly3 result, reduces fpga usage from 93% to 90%
+//	12/19/06 Initial
+//	12/22/06 Change comparison direction
+//	01/05/07 Change to combined 1/2-strip and distrip method
+//	01/09/07 Replace count1s adders with LUT version
+//	01/10/07 Narrow layer inputs to exclude unused 1/2-strips
+//	01/16/07 Change from 15 to 9 patterns
+//	01/18/07 Mod pattern 5 OR
+//	02/22/07 Add pipleline latch
+//	02/27/07 Reposition pipleline for max speed, min area
+//	05/08/07 Change pattern numbers 1-9 to 0-8 so lsb now implies bend direction
+//	05/23/07 Mod pattern 3 ly5 to mirror pattern 2
+//	06/08/07 Remove pipeline stage
+//	06/12/07 Had to revert to pipeline stage, could only achieve 30MHz otherwise
+//	06/15/07 Incorporate layer mode as pattern 1, shift clct patterns IDs to the range 2-10
+//	06/28/07 Shift key layer to ly2, flip patterns top-to-bottom, old ly0 becomes new ly5, left bends become right
+//	07/02/07 Flip pat[i][5:0] to pat[i][0:5] to match prior ly3 result, reduces fpga usage from 93% to 90%
+//	08/11/10 Port to ise 12
+//	08/12/10 Replace LUT version of count1s because xst 12.2 inferred read-only ram instead of luts
 //------------------------------------------------------------------------------------------------------------------------
 	module pattern_unit
 	(
@@ -35,14 +38,27 @@
 	pat_nhits,
 	pat_id
 	);
+
+//------------------------------------------------------------------------------------------------------------------------
+// Generic
 //------------------------------------------------------------------------------------------------------------------------
 	parameter MXLY		= 6;			// Number of CSC layers
 	parameter MXHITB	= 3;			// Hits on pattern bits
 	parameter MXPID		=11;			// Number of patterns
 	parameter MXPIDB	= 4;			// Pattern ID bits, lsb=bend direction
 
+//-------------------------------------------------------------------------------------------------------------------
+// Load global definitions
+//-------------------------------------------------------------------------------------------------------------------
+	`include "firmware_version.v"
+
+	`ifndef VIRTEX6 initial	$display("pattern_unit: FPGA_TYPE=VIRTEX2"); `endif
+	`ifdef  VIRTEX6 initial	$display("pattern_unit: FPGA_TYPE=VIRTEX6"); `endif
+
 //------------------------------------------------------------------------------------------------------------------------
-// Input Ports
+// Ports
+//------------------------------------------------------------------------------------------------------------------------
+// Inputs
 	input					clock_2x;	// Pipeline clock
 	input	[10:0]			ly0;
 	input	[ 7:3]			ly1;
@@ -51,7 +67,7 @@
 	input	[ 9:1]			ly4;
 	input	[10:0]			ly5;		// 1/2-strips 1 layer 1 cell
 
-// Output Ports
+// Outputs
 	output	[MXHITB-1:0]	pat_nhits;	// Number layers hit for highest pattern
 	output	[MXPIDB-1:0]	pat_id;		// Highest pattern found
 
@@ -199,7 +215,7 @@
 
 // Add 2 to pid to shift to range 2-10
 	assign pat_nhits = nhits_s3[0];
-	assign pat_id	 = pid_s3[0]+2;
+	assign pat_id	 = pid_s3[0]+4'd2;
 
 //------------------------------------------------------------------------------------------------------------------------
 // Prodcedural function to sum number of layers hit into a binary value - LUT version
@@ -207,7 +223,22 @@
 //
 // 7 LUT 7.564nsec
 // 01/09/2007 Initial
+// 08/12/2010 Adder version for virtex6 because xst inferred read-only ram instead of luts
 //------------------------------------------------------------------------------------------------------------------------
+// Virtex 6
+//------------------------------------------------------------------------------------------------------------------------
+`ifdef VIRTEX6
+	function [2:0]	count1s;
+	input	 [5:0]	inp;
+	begin
+	count1s = (inp[5]+inp[4]+inp[3])+(inp[2]+inp[1]+inp[0]);
+	end
+	endfunction
+
+//------------------------------------------------------------------------------------------------------------------------
+// Virtex 2
+//------------------------------------------------------------------------------------------------------------------------
+`else
 	function [2:0]	count1s;
 	input	 [5:0]	inp;
 	reg		 [3:0]	lut;
@@ -318,5 +349,8 @@
 	count1s=rom;
 	end
 	endfunction
+`endif
 
+//------------------------------------------------------------------------------------------------------------------------
 	endmodule
+//------------------------------------------------------------------------------------------------------------------------

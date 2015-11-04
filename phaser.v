@@ -8,6 +8,9 @@
 //	06/15/09 Change to -32 to +31 phase range to span 25/4=6.25ns
 //	09/11/09 Add quadrant FF update strobe
 //	09/13/09 FF buffer update strobe
+//	09/30/10 Port to ise 12
+//	11/08/10 Add virtex6 option for wider phase counter
+//	11/18/10 Correction to virtex2 bus width
 //-----------------------------------------------------------------------------------------------------------------
 	module phaser
 	(
@@ -33,40 +36,50 @@
 	update_quad
 
 // Debug ports
-`ifdef DEBUG_PHASER
+	`ifdef DEBUG_PHASER
 	,current_phase
 	,dps_sm_dsp
-`endif
+	`endif
     );
+//-----------------------------------------------------------------------------------------------------------------
+// Firmware type determines phase port and counter widths
+//-----------------------------------------------------------------------------------------------------------------
+	`include "firmware_version.v"
+
+	`ifdef VIRTEX2 parameter MXPHASE=6;  `endif
+	`ifdef VIRTEX6 parameter MXPHASE=11; `endif
+
+	initial	$display("phaser: MXPHASE=%d",MXPHASE);
+
 //-----------------------------------------------------------------------------------------------------------------
 // Ports
 //-----------------------------------------------------------------------------------------------------------------
 // Clocks
-	input			clock;					// 40MHz global TMB clock 1x
-	input			global_reset;			// Global reset, asserted until main DLL locks
+	input					clock;				// 40MHz global TMB clock 1x
+	input					global_reset;		// Global reset, asserted until main DLL locks
 
 // DCM lock status ports
-	input			lock_tmb;				//  Lock state for TMB main clock DLL
-	input			lock_dcm;				//  Lock state for this DCM
+	input					lock_tmb;			//  Lock state for TMB main clock DLL
+	input					lock_dcm;			//  Lock state for this DCM
 
 // DCM digital phase shift ports
-	output			psen;					// Dps phase shift enable
-	output			psincdec;				// Dps phase increment/decrement
-	input			psdone;					// Dps done
+	output					psen;				// Dps phase shift enable
+	output					psincdec;			// Dps phase increment/decrement
+	input					psdone;				// Dps done
 
 // VME control/status ports
-	input			fire;					// VME Set new phase
-	input			reset;					// VME Reset current phase
-	input	[5:0]	phase;					// VME Phase to set, 0-63
-	output			busy;					// VME Phase shifter busy
-	output	[2:0]	dps_sm_vec;				// VME Phase shifter machine state
-	output			update_quad;			// Update quadrant select FFs
+	input					fire;				// VME Set new phase
+	input					reset;				// VME Reset current phase
+	input	[MXPHASE-1:0]	phase;				// VME Phase to set, 0-63
+	output					busy;				// VME Phase shifter busy
+	output	[2:0]			dps_sm_vec;			// VME Phase shifter machine state
+	output					update_quad;		// Update quadrant select FFs
 
 // Debug ports
-`ifdef DEBUG_PHASER
-	output	[5:0]	current_phase;			// Current dcm phase
-	output	[47:0]	dps_sm_dsp;				// State Machine ASCII display
-`endif
+	`ifdef DEBUG_PHASER
+	output	[MCPHPASE-1:0]	current_phase;		// Current dcm phase
+	output	[47:0]			dps_sm_dsp;			// State Machine ASCII display
+	`endif
 
 //-----------------------------------------------------------------------------------------------------------------
 //  Digital phase shift State Machine
@@ -150,8 +163,10 @@
 	end
 
 // Track current phase value presumed inside DCM
-	parameter phase_offset=32;			// DCM resets to 0 phase shift, corresponds to 32 in the 0-63 range
-	reg [5:0] current_phase=phase_offset;
+	`ifdef VIRTEX2 parameter phase_offset=32; `endif	// Virtex2 DLL resets to 0 phase shift, corresponds to 32 in the 0-63 range
+	`ifdef VIRTEX6 parameter phase_offset=0;  `endif	// Virtex6 PLL resets to 0 phase shift
+	
+	reg [MXPHASE-1:0] current_phase=phase_offset;
 
 	wire   next_phase  = (dps_sm == inc_dec);
 	assign busy        = (dps_sm != idle);
@@ -161,8 +176,8 @@
 	always @(posedge clock) begin
 	if (phase_reset)	current_phase <= phase_offset;
 	if (next_phase) begin
-	if (increment) 		current_phase <= current_phase+1;
-	else  				current_phase <= current_phase-1;
+	if (increment) 		current_phase <= current_phase+1'b1;
+	else  				current_phase <= current_phase-1'b1;
 	end
 	end
 

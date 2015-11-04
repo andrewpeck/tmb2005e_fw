@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-//`define DEBUG_DSN 1
+//`define DEBUG_DSN_RAT 1
 //--------------------------------------------------------------------------------------------------------------
 // DSN
 //
@@ -20,21 +20,22 @@
 //	08/26/10 Move reg for non debug version, add generate block names for ise 8
 //	08/26/10 Push inverter to input side of dsn_out ff, was getting map warnings
 //	09/10/10 Invert rat output
+//	12/16/10 Separate rat and tmb dsn modules
+//	12/17/10 Remove dsn_io pullup, hdl pullup causes wrong bonded iob count
 //--------------------------------------------------------------------------------------------------------------
-	module dsn
+	module dsn_rat
 	(
 	clock,
 	global_reset,
 	start,
-	dsn_io,
-	dsn_in_rat,
-	dsn_out_rat,
+	dsn_in,
+	dsn_out,
 	wr_data,
 	wr_init,
 	busy,
-	rd_data,
-	dsn_sump
-`ifdef DEBUG_DSN
+	rd_data
+	
+	`ifdef DEBUG_DSN_RAT
 	,dsn_sm_dsp
 	,count_done
 	,write_done
@@ -42,14 +43,11 @@
 	,end_count
 	,end_write
 	,count
-`endif
+	`endif
 	);
 //--------------------------------------------------------------------------------------------------------------
 // Generic
 //--------------------------------------------------------------------------------------------------------------
-	parameter RATMODE =	0;			// 0=for TMB and Mez, 1 for RAT
-	initial	$display("dsn: RATMODE=%d",RATMODE);
-
 // Counter widths
 	parameter MXCNT		=	17;		// Main counter dimension
 	parameter MXEND		=	5;		// End counter width, log2(mxcnt)+1
@@ -64,17 +62,15 @@
 	input 	clock;					// 40MHz clock
 	input	global_reset;			// Global reset
 	input	start;					// Begin counting
-	inout	dsn_io;					// DSN chip I/O pin
-	input	dsn_in_rat;				// Non-bidir input  for RAT
-	output	dsn_out_rat;			// Non-bidir output for RAT
+	input	dsn_in;					// Non-bidir input  for RAT
+	output	dsn_out;				// Non-bidir output for RAT
 	input	wr_data;				// DSN data bit to output
 	input	wr_init;				// DSN init mode
 	output	busy;					// DSN chip is busy
 	output	rd_data;				// DSN data read from chip
-	output	dsn_sump;				// Unused signals
 
 // Debug
-	`ifdef DEBUG_DSN
+	`ifdef DEBUG_DSN_RAT
 	output	count_done;
 	output	write_done;
 	output	latch_data;
@@ -109,31 +105,16 @@
 	wire write_done = count[end_write];
 	wire latch_data = count[CNT_READ];
 
-// Bidir I/O pins for TMB, unidir for RAT
-	reg  dsn_out=0;
-	wire dsn_in;
-
-	generate 
-	if (RATMODE==1) begin: genrat		// RAT is non-bidir							
-	assign dsn_io      =  0;
-	assign dsn_in      =  dsn_in_rat;	
-	assign dsn_out_rat = ~dsn_out;
-	assign dsn_sump    =  dsn_io;
-	end
-	else begin: gentmb					// Mez and TMB are bidir open drain
-	PULLUP dsn_io_pullup (dsn_io);
-	assign dsn_io      = (dsn_out) ? 1'b0 : 1'bz;
-	assign dsn_in      =  dsn_io;
-	assign dsn_out_rat =  0;
-	assign dsn_sump    =  dsn_in_rat;
-	end
-	endgenerate
-
 // Output Pulse-width-modulated FF
+	reg  dsn_out_ff=0;
+
 	always @(posedge clock) begin
-	if (write_done)	dsn_out <= 0;
-	else			dsn_out <= (dsn_sm==pulse) || dsn_out;
+	if (write_done)	dsn_out_ff <= 0;
+	else			dsn_out_ff <= (dsn_sm==pulse) || dsn_out_ff;
 	end
+
+// Unidir IOs for RAT
+	assign dsn_out = ~dsn_out_ff;
 
 // Main Counter
 	assign busy  = (dsn_sm != idle) && (dsn_sm != unstart);
@@ -167,7 +148,7 @@
 	end
 
 // Debug
-   `ifdef DEBUG_DSN
+   `ifdef DEBUG_DSN_RAT
 	output reg [39:0] dsn_sm_dsp;
 
 	always @* begin

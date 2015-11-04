@@ -4,6 +4,7 @@
 //	02/19/09	Initial copied from Xilinx xapp645 top_32b_EDC.v
 //	02/23/09	Removed FFs + reorganized into separate ecoder/decoder sections
 //	03/03/09	Converted from 32-bit version
+//	07/26/10	Port to ise 12
 //-------------------------------------------------------------------------------------------------------------------
 	module ecc16_encoder (
 	enc_in,

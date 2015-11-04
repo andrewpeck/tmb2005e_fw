@@ -7,6 +7,7 @@
 //	11/18/08 Mod perr enable to wait for raw hits rams to write parity to all 2K addresses
 //	11/26/08 Add ram error map
 //	04/30/09 Add miniscope ram parity
+//	08/17/10 Port to ise 12
 //------------------------------------------------------------------------------------------------------------------
 	module parity
 	(
@@ -121,7 +122,7 @@
 	wire reset            = perr_reset || global_reset;
 
 	always @(posedge clock) begin
-	if (fifo_wadr_cnt_en) fifo_wadr_cnt <= fifo_wadr_cnt+1;
+	if (fifo_wadr_cnt_en) fifo_wadr_cnt <= fifo_wadr_cnt+1'b1;
 	else				  fifo_wadr_cnt <= 0;
 	end
 

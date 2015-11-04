@@ -295,6 +295,12 @@
 //	06/25/10 New miniscope channels delay pretrig bits and now include L1A signals
 //	06/26/10 Reduce miniscope channels to 14 because unpacker is weak
 //	07/01/10 Add counter for events lost from readout due to L1A window prioritizing
+//	09/20/10 Port to ise 12
+//	09/21/10 Replace * operators
+//	09/22/10 Add l1a window sr preset from vme
+//	10/01/10 Replace scope ram with sdp
+//	10/06/10 Revert to blocking operators because l1a ram adr calcs require them
+//	10/18/10 Add virtex 6 RAM option
 //------------------------------------------------------------------------------------------------------------------
 //	Readout Format:
 //------------------------------------------------------------------------------------------------------------------
@@ -525,6 +531,7 @@
 	l1a_window,
 	l1a_win_pri_en,
 	l1a_lookback,
+	l1a_preset_sr,
 
 	l1a_allow_match,
 	l1a_allow_notmb,
@@ -931,6 +938,10 @@
 	,clct_pop_xtmb
 	,clct_wr_adr_xtmb
 	,clct_wr_avail_xtmb
+
+	,l1a_delay_wadr	
+	,l1a_delay_radr
+	,l1a_delay_adj
 `endif
 	);
 //------------------------------------------------------------------------------------------------------------------
@@ -1020,6 +1031,9 @@
 	parameter MXCNTVME		=	30;				// VME counter length
 	parameter MXL1ARX		=	12;				// Number L1As received counter bits
 	parameter MXORBIT		=	30;				// Number orbit counter bits
+
+// Block RAM type
+	`include "firmware_version.v"
 
 //------------------------------------------------------------------------------------------------------------------
 // I/O Ports:
@@ -1182,6 +1196,7 @@
 	input	[MXL1WIND-1:0]	l1a_window;			// Level1 Accept window width after delay
 	input					l1a_win_pri_en;		// Enable L1A window priority
 	input	[MXBADR-1:0]	l1a_lookback;		// Bxn to look back from l1a wr_buf_adr
+	input					l1a_preset_sr;		// Dummy VME bit to feign preset l1a sr group
 
 	input					l1a_allow_match;	// Readout allows tmb trig pulse in L1A window (normal mode)
 	input					l1a_allow_notmb;	// Readout allows no tmb trig pulse in L1A window
@@ -1588,6 +1603,10 @@
 	output					clct_pop_xtmb;
 	output	[MXBADR-1:0]	clct_wr_adr_xtmb;
 	output					clct_wr_avail_xtmb;
+
+	output	[7:0]			l1a_delay_wadr;	
+	output	[7:0]			l1a_delay_radr;
+	output	[7:0]			l1a_delay_adj;
 `endif
 
 //------------------------------------------------------------------------------------------------------------------
@@ -1774,8 +1793,8 @@
 	reg [MXBXN-1:0] bxn_offset_l1a_lim     = 0;
 
 	always @(posedge clock) begin
-	bxn_offset_pretrig_lim <= (bxn_offset_pretrig >= lhc_cycle) ? (lhc_cycle-1) : (bxn_offset_pretrig);
-	bxn_offset_l1a_lim     <= (bxn_offset_l1a     >= lhc_cycle) ? (lhc_cycle-1) : (bxn_offset_l1a); 
+	bxn_offset_pretrig_lim <= (bxn_offset_pretrig >= lhc_cycle) ? (lhc_cycle-1'b1) : (bxn_offset_pretrig);
+	bxn_offset_l1a_lim     <= (bxn_offset_l1a     >= lhc_cycle) ? (lhc_cycle-1'b1) : (bxn_offset_l1a); 
 	end
 
 // Bunch Crossing Counter, counts 0 to 3563, presets at resync or bxreset, stops counting, resumes at bx0
@@ -1972,9 +1991,9 @@
 	x_delay   uninjdly  (.d(inj_trig_pulse),.clock(clock),.delay(inj_delay_rat[3:0]),.q(inj_trig_pulse_ff));
 
 	always@(posedge clock) begin
-	injector_go_cfeb[MXCFEB-1:0]	<= inj_trig_pulse_ff * injector_mask_cfeb[MXCFEB-1:0];	// waits for rat
-	injector_go_rpc					<= inj_trig_pulse_ff & injector_mask_rpc;				// waits for rat
-	injector_go_rat					<= inj_trig_pulse    & injector_mask_rat;				// fires first
+	injector_go_cfeb[MXCFEB-1:0]	<= {MXCFEB{inj_trig_pulse_ff}} & injector_mask_cfeb;	// waits for rat
+	injector_go_rpc					<=         inj_trig_pulse_ff   & injector_mask_rpc;		// waits for rat
+	injector_go_rat					<=         inj_trig_pulse      & injector_mask_rat;		// fires first
 	end
 
 // Raw hits & header RAM buffer status
@@ -2011,13 +2030,13 @@
 	
 	always @(posedge clock) begin
 	if		(ttc_resync      )	alct_width_cnt = 0;							// Clear on reset
-	else if (alct_open_window)	alct_width_cnt = alct_trig_width-1;			// Load persistence count
-	else if (alct_width_bsy  )	alct_width_cnt = alct_width_cnt-1;			// Decrement count down to 0
+	else if (alct_open_window)	alct_width_cnt = alct_trig_width-1'b1;		// Load persistence count
+	else if (alct_width_bsy  )	alct_width_cnt = alct_width_cnt-1'b1;		// Decrement count down to 0
 	end
 
-	wire   alct_pretrig_window = alct_width_bsy | alct_open_window;			// Assert immediately, hold until count done
-	assign alct_pretrig_win    = (alct_open_window) ? 0: alct_trig_width-alct_width_cnt;// Position of alct active feb signal at pretrigger
-	wire   alct_required       = alct_match_trig_en && !clct_pat_trig_en;	// ALCT coincidence is required
+	wire   alct_pretrig_window = alct_width_bsy | alct_open_window;							// Assert immediately, hold until count done
+	assign alct_pretrig_win    = (alct_open_window) ? 4'h0: alct_trig_width-alct_width_cnt;	// Position of alct active feb signal at pretrigger
+	wire   alct_required       = alct_match_trig_en && !clct_pat_trig_en;					// ALCT coincidence is required
 
 // Pre-trigger Source Multiplexer
 	wire [8:0] trig_source;
@@ -2116,8 +2135,8 @@
 	reg	 [MXTHROTTLE-1:0] throttle_cnt=0;
 
 	always @(posedge clock) begin
-	if		(clct_sm != throttle) throttle_cnt = clct_throttle-1;	// sync load
-	else if (clct_sm == throttle) throttle_cnt = throttle_cnt-1;	// only count during throttle
+	if		(clct_sm != throttle) throttle_cnt = clct_throttle-1'b1;	// Sync load
+	else if (clct_sm == throttle) throttle_cnt = throttle_cnt-1'b1;		// Only count during throttle
 	end
 
 	assign throttle_done = (throttle_cnt == 0) || nothrottle;
@@ -2133,8 +2152,8 @@
 	wire flush_cnt_ena = (clct_sm == flush);
 
 	always @(posedge clock) begin
-	if		(flush_cnt_clr) flush_cnt = clct_flush_delay-1;		// sync load before entering flush state
-	else if (flush_cnt_ena) flush_cnt = flush_cnt-1;			// only count during flush
+	if		(flush_cnt_clr) flush_cnt = clct_flush_delay-1'b1;	// sync load before entering flush state
+	else if (flush_cnt_ena) flush_cnt = flush_cnt-1'b1;			// only count during flush
 	end
 
 	assign flush_done = ((flush_cnt == 0) || noflush) && clct_notbusy;
@@ -2163,7 +2182,7 @@
 	reg [MXCFEB-1:0] cfeb_hit_at_pretrig = 0;
 
 	always @(posedge clock) begin
-	cfeb_hit_at_pretrig <= cfeb_hit_s0 * clct_pretrig;
+	cfeb_hit_at_pretrig <= cfeb_hit_s0 & {MXCFEB{clct_pretrig}};
 	end
 
 // Trigger source was ME1A or ME1B
@@ -2302,11 +2321,11 @@
 	wire clct1_blanking = clct_blanking && !clct1_vpf;
 
 // Send CLCTs to TMB for ALCT matching and MPC readout
-	assign clct0_xtmb = clct0 * !clct0_blanking;
-	assign clct1_xtmb = clct1 * !clct1_blanking;
-	assign clcta_xtmb = clcta * !clct0_blanking;
-	assign clctc_xtmb = clctc * !clct0_blanking;
-	assign clctf_xtmb = clctf * !clct0_blanking;
+	assign clct0_xtmb = clct0 & {MXCLCT {!clct0_blanking}};
+	assign clct1_xtmb = clct1 & {MXCLCT {!clct1_blanking}};
+	assign clcta_xtmb = clcta & {MXCLCTA{!clct0_blanking}};
+	assign clctc_xtmb = clctc & {MXCLCTC{!clct0_blanking}};
+	assign clctf_xtmb = clctf & {MXCFEB {!clct0_blanking}};
 
 // Latch CLCTs for VME
 	reg [MXCLCT-1:0]	clct0_vme=0;
@@ -2458,6 +2477,7 @@
 
 	reg cnt_en_all      = 0;
 	reg cnt_any_ovf_seq = 0;
+
 	always @(posedge clock) begin
 	cnt_any_ovf_seq	<= cnt_any_ovf_clct;
 	cnt_en_all		<= !((cnt_any_ovf_clct || cnt_any_ovf_alct) && cnt_stop_on_ovf);
@@ -2475,7 +2495,7 @@
 	cnt[j] = cnt_fatzero;								// Clear counter j
 	end
 	else if (cnt_en_all) begin
-	if(cnt_en[j] && cnt_nof[j]) cnt[j] = cnt[j]+1;		// Increment counter j if it has not overflowed
+	if (cnt_en[j] && cnt_nof[j]) cnt[j] = cnt[j]+1'b1;	// Increment counter j if it has not overflowed
 	end
 	end
 	end
@@ -2784,17 +2804,16 @@
 	x_oneshot uveto (.d(scint_veto_clr), .clock(clock), .q(scint_veto_clr_os));
 
 	always @(posedge clock) begin
-	if(scint_veto_clr_os)
-	begin
-	scint_veto		<=	0;
-	scint_veto_vme	<=	0;
+	if (scint_veto_clr_os) begin
+	scint_veto     <= 0;
+	scint_veto_vme <= 0;
 	end
-	else
-	begin
-	scint_veto 		<=	(scint_pretrig | scint_veto);
-	scint_veto_vme <=	(scint_pretrig | scint_veto);
+	else begin
+	scint_veto     <= (scint_pretrig | scint_veto);
+	scint_veto_vme <= (scint_pretrig | scint_veto);
 	end
 	end
+
 //------------------------------------------------------------------------------------------------------------------
 // Level 1 Accept Processing Section
 //------------------------------------------------------------------------------------------------------------------
@@ -2804,10 +2823,8 @@
 	wire l1a_delay_limit = (l1a_delay < L1ADLYOFFSET);	// Dont let some schmoe to set it below the minimum
 
 	always @(posedge clock) begin
-	if (l1a_delay_limit)				// Enforce minimum l1a delay
-	l1a_delay_adj <= L1ADLYOFFSET;
-	else								// Standard l1a offset
-	l1a_delay_adj <= l1a_delay - L1ADLYOFFSET;
+	if (l1a_delay_limit) l1a_delay_adj <= L1ADLYOFFSET;								// Enforce minimum l1a delay
+	else                 l1a_delay_adj <= l1a_delay - L1ADLYOFFSET[MXL1DELAY-1:0];	// Standard l1a offset
 	end
 
 // L1A parallel shifter write address increments every cycle, read address is later in time by l1a_delay
@@ -2821,7 +2838,6 @@
 
 // On TMB trigger, store event record in L1A shifter, FF required to align data before RAM write
 	wire [15:0] l1a_dia;					// Port A data pushed by TMB
-	wire [15:0] l1a_dib=0;					// Port B dummy in,  never write
 	wire [15:0] l1a_dob;					// Port B data out after L1A delay
 
 	wire tmb_push = tmb_trig_pulse && (tmb_trig_keep || tmb_non_trig_keep) && !no_daq && wr_avail_rtmb;
@@ -2832,32 +2848,74 @@
 	assign l1a_dia[13]    = tmb_alct_only;
 	assign l1a_dia[15:14] = 2'h0;
 
-// L1A parallel shifter dual port RAM, port A wr=event data, rd=na, port B wr=na, rd=event data delayed ~128bx
+// L1A parallel shifter dual port RAM
+//  Port A wo 18-bit event data
+//	Port B ro 18-bit event data delayed ~128bx
+`ifdef VIRTEX2
+	initial $display("sequencer: generating Virtex2 RAMB16_S18_S18 ul1abs");
+
 	RAMB16_S18_S18 # (
-	.SIM_COLLISION_CHECK("WARNING_ONLY"),	// Collision check enable "ALL", "WARNING_ONLY","GENERATE_X_ONLY" or "NONE
-	.WRITE_MODE_A		("WRITE_FIRST"),	// "WRITE_FIRST", "READ_FIRST", or "NO_CHANGE
-	.WRITE_MODE_B		("READ_FIRST")		// "WRITE_FIRST", "READ_FIRST", or "NO_CHANGE
+	.WRITE_MODE_A		("READ_FIRST"),					// "WRITE_FIRST", "READ_FIRST", or "NO_CHANGE"
+	.WRITE_MODE_B		("READ_FIRST"),					// "WRITE_FIRST", "READ_FIRST", or "NO_CHANGE"
+	.SIM_COLLISION_CHECK("ALL")							// "ALL", "WARNING_ONLY","GENERATE_X_ONLY" or "NONE"
 	) ul1abs (
-	.WEA	(1'b1),							// Port A Write Enable Input
-	.ENA	(1'b1),							// Port A RAM Enable Input
-	.SSRA	(1'b0),							// Port A Synchronous Set/Reset Input
-	.CLKA	(clock),						// Port A Clock
-	.ADDRA	({2'b00,l1a_delay_wadr[7:0]}),	// Port A 10-bit Address Input
-	.DIA	(l1a_dia[15:0]),				// Port A 16-bit Data Input
-	.DIPA	(2'b00),						// Port A 2-bit parity Input
-	.DOA	(),								// Port A 16-bit Data Output
-	.DOPA	(),								// Port A 2-bit Parity Output
+	.WEA				(1'b1),							// Port A Write Enable Input
+	.ENA				(1'b1),							// Port A RAM Enable Input
+	.SSRA				(1'b0),							// Port A Synchronous Set/Reset Input
+	.CLKA				(clock),						// Port A Clock
+	.ADDRA				({2'b00,l1a_delay_wadr[7:0]}),	// Port A 10-bit Address Input
+	.DIA				(l1a_dia[15:0]),				// Port A 16-bit Data Input
+	.DIPA				(2'b00),						// Port A 2-bit parity Input
+	.DOA				(),								// Port A 16-bit Data Output
+	.DOPA				(),								// Port A 2-bit Parity Output
 	
-	.WEB	(1'b0),							// Port B Write Enable Input
-	.ENB	(1'b1),							// Port B RAM Enable Input
-	.SSRB	(1'b0),							// Port B Synchronous Set/Reset Input
-	.CLKB	(clock),						// Port B Clock
-	.ADDRB	({2'b00,l1a_delay_radr[7:0]}),	// Port B 10-bit Address Input
-	.DIB	(l1a_dib[15:0]),				// Port B 16-bit Data Input
-	.DIPB	(2'b00),						// Port B 2-bit parity Input
-	.DOB	(l1a_dob[15:0]),				// Port B 16-bit Data Output
-	.DOPB	()								// Port B 2-bit Parity Output
-	);
+	.WEB				(1'b0),							// Port B Write Enable Input
+	.ENB				(1'b1),							// Port B RAM Enable Input
+	.SSRB				(1'b0),							// Port B Synchronous Set/Reset Input
+	.CLKB				(clock),						// Port B Clock
+	.ADDRB				({2'b00,l1a_delay_radr[7:0]}),	// Port B 10-bit Address Input
+	.DIB				(16'h0000),						// Port B 16-bit Data Input
+	.DIPB				(2'b00),						// Port B 2-bit parity Input
+	.DOB				(l1a_dob[15:0]),				// Port B 16-bit Data Output
+	.DOPB				());							// Port B 2-bit Parity Output
+
+`else
+	initial $display("sequencer: generating Virtex6 RAMB18E1_S18_S18 ul1abs");
+
+	RAMB18E1 #(												// Virtex6
+	.RAM_MODE			("TDP"),							// SDP or TDP
+ 	.READ_WIDTH_A		(0),								// 0,1,2,4,9,18,36 Read/write width per port
+	.WRITE_WIDTH_A		(18),								// 0,1,2,4,9,18
+	.READ_WIDTH_B		(18),								// 0,1,2,4,9,18
+	.WRITE_WIDTH_B		(0),								// 0,1,2,4,9,18,36
+	.WRITE_MODE_A		("READ_FIRST"),						// WRITE_FIRST, READ_FIRST, or NO_CHANGE
+	.WRITE_MODE_B		("READ_FIRST"),
+	.SIM_COLLISION_CHECK("ALL")								// ALL, WARNING_ONLY, GENERATE_X_ONLY or NONE)
+	) ul1abs (
+	.WEA				(2'b11),							//  2-bit A port write enable input
+	.ENARDEN			(1'b1),								//  1-bit A port enable/Read enable input
+	.RSTRAMARSTRAM		(1'b0),								//  1-bit A port set/reset input
+	.RSTREGARSTREG		(1'b0),								//  1-bit A port register set/reset input
+	.REGCEAREGCE		(1'b0),								//  1-bit A port register enable/Register enable input
+	.CLKARDCLK			(clock),							//  1-bit A port clock/Read clock input
+	.ADDRARDADDR		({2'h0,l1a_delay_wadr[7:0],4'hF}),	// 14-bit A port address/Read address input 18b->[13:4]
+	.DIADI				(l1a_dia[15:0]),					// 16-bit A port data/LSB data input
+	.DIPADIP			(),									//  2-bit A port parity/LSB parity input
+	.DOADO				(),									// 16-bit A port data/LSB data output
+	.DOPADOP			(),									//  2-bit A port parity/LSB parity output
+
+	.WEBWE				(),									//  4-bit B port write enable/Write enable input
+	.ENBWREN			(1'b1),								//  1-bit B port enable/Write enable input
+	.REGCEB				(1'b0),								//  1-bit B port register enable input
+	.RSTRAMB			(1'b0),								//  1-bit B port set/reset input
+	.RSTREGB			(1'b0),								//  1-bit B port register set/reset input
+	.CLKBWRCLK			(clock),							//  1-bit B port clock/Write clock input
+	.ADDRBWRADDR		({2'h0,l1a_delay_radr[7:0],4'hF}),	// 14-bit B port address/Write address input 18b->[13:4]
+	.DIBDI				(),									// 16-bit B port data/MSB data input
+	.DIPBDIP			(),									//  2-bit B port parity/MSB parity input
+	.DOBDO				(l1a_dob[15:0]),					// 16-bit B port data/MSB data output
+	.DOPBDOP			());								//  2-bit B port parity/MSB parity output
+`endif
 
 // After ~128bx L1A delay, unpack data stored in L1A parallel shifter
 	wire 		tmb_push_dly		= l1a_dob[0];
@@ -2891,20 +2949,34 @@
 	winclosed <= l1a_window;
 	end
 
+// L1A window preset and clear ffs
+	reg preset_sr = 0;
+	reg clear_sr  = 0;
+
+	always @(posedge clock) begin
+	preset_sr <= l1a_preset_sr;
+	clear_sr  <= ttc_resync;
+	end
+
 // Decode L1A window width setting to select which l1a_vpf_sr stages to include in l1a_window
 	reg [15:0]	l1a_sr_include=0;
 	integer i;
 
 	always @(posedge clock) begin
+	if      (preset_sr) l1a_sr_include <= 16'hFFFF;
+	else if (clear_sr ) l1a_sr_include <= 0;
+
+	else begin
 	i=0;
 	while (i<=15) begin
-	if(l1a_window!=0)
+	if (l1a_window!=0)
 	l1a_sr_include[i] <= (i<=l1a_window-1);	// l1a_window=3, enables sr stages 0,1,2
 	else
 	l1a_sr_include[i] <= 0;					// l1a_window=0, disables all sr stages
 	i=i+1;
-	end
-	end
+	end	// close while
+	end	// close else
+	end	// close clock
 
 // Calculate dynamic L1A window center and positional priorities
 	reg  [3:0] l1a_win_priority [15:0];
@@ -2913,10 +2985,10 @@
 	always @(posedge clock) begin
 	i=0;
 	while (i<=15) begin
-	if		(ttc_resync)			 l1a_win_priority[i]=4'hF;
-	else if (i>=l1a_window || i==0)  l1a_win_priority[i]=0;									// i >  lastwin or i=0
-	else if (i<=l1a_win_center    )	 l1a_win_priority[i]=l1a_window-1-2*(l1a_win_center-i);	// i <= center
-	else							 l1a_win_priority[i]=l1a_window-0-2*(i-l1a_win_center);	// i >  center
+	if		(ttc_resync)			 l1a_win_priority[i] = 4'hF;
+	else if (i>=l1a_window || i==0)  l1a_win_priority[i] = 0;									// i >  lastwin or i=0
+	else if (i<=l1a_win_center    )	 l1a_win_priority[i] = l1a_window-1'd1-((l1a_win_center-i[3:0])<<1);	// i <= center
+	else							 l1a_win_priority[i] = l1a_window-1'd0-((i[3:0]-l1a_win_center)<<1);	// i >  center
 	i=i+1;
 	end
 	end
@@ -2943,11 +3015,10 @@
 	wire [15:0] win_ena;				// Table of enabled window positions
 	wire [3:0]  win_pri [15:0];			// Table of window position priorities that are enabled
 
-//	genvar j;							// Table window priorities multipled by window position enables
-	generate
+	generate							// Table window priorities multipled by window position enables
 	for (j=0; j<=15; j=j+1) begin: genpri
 	assign win_ena[j] = (l1a_sr_include[j]==1 && l1a_vpf_sr[j]==1 && l1a_tag_sr[j]==0);
-	assign win_pri[j] = (l1a_win_priority[j] * win_ena[j]);
+	assign win_pri[j] = (l1a_win_priority[j]  & {4{win_ena[j]}});
 	end
 	endgenerate
 
@@ -3016,29 +3087,46 @@
 
 // L1A window lost events due to prioritizing
 	always @(posedge clock) begin
-	if (ttc_resync) l1a_see_sr <= 0;
+	if      (preset_sr) l1a_see_sr <= 1;
+	else if (clear_sr ) l1a_see_sr <= 0;
+
+	else begin
 	i=0;
 	while (i<=14) begin
 	if (l1a_match && l1a_vpf_sr[i] && l1a_sr_include[i] && !l1a_tag_sr[i]) l1a_see_sr[i+1] <= 1;
 	else                                                                   l1a_see_sr[i+1] <= l1a_see_sr[i];
 	i=i+1;
 	end	// close while
+	end	// close else
 	end	// close clock
 
 // L1A window matching shift registers
 	always @(posedge clock) begin
-	if (ttc_resync) begin				// Sych reset
-	l1a_tag_sr			<= 0;			// Readout tag
+
+	if (preset_sr) begin				// Sych preset 1st stage
+	l1a_tag_sr			<= 1;			// Readout tag
 	l1a_win_sr[0][3:0]	<= 4'hF;		// L1A Window position at LCT*L1A coincidence
-	l1a_cnt_sr[0][11:0]	<= 0;			// L1As received counter at LCT*L1A coincidence
-	l1a_bxn_sr[0][11:0]	<= 0;			// BXN counter  at LCT*L1A coincidence
+	l1a_cnt_sr[0][11:0]	<= 12'hFFF;		// L1As received counter at LCT*L1A coincidence
+	l1a_bxn_sr[0][11:0]	<= 12'hFFF;		// BXN counter  at LCT*L1A coincidence
 	end
 
+	else if (clear_sr) begin			// Sych reset all stages
+	i=0;								// Loop over 15 window positions 0 to 15 
+	while (i<=15) begin
+	l1a_tag_sr			<= 0;			// Readout tag
+	l1a_win_sr[i][3:0]	<= 0;			// L1A Window position at LCT*L1A coincidence
+	l1a_cnt_sr[i][11:0]	<= 0;			// L1As received counter at LCT*L1A coincidence
+	l1a_bxn_sr[i][11:0]	<= 0;			// BXN counter  at LCT*L1A coincidence
+	i=i+1;
+	end
+	end
+
+	else begin
 	i=0;								// Loop over 15 window positions 0 to 14 
 	while (i<=14) begin
 	if (l1a_match && l1a_vpf_sr[i] && l1a_sr_include[i] && !l1a_tag_sr[i] && ((l1a_win_best==i) || nl1a_win_pri_en)) begin
 	l1a_tag_sr[i+1]       <= 1;								// Readout tag
-	l1a_win_sr[i+1][3:0]  <= i;								// L1A Window position at LCT*L1A coincidence
+	l1a_win_sr[i+1][3:0]  <= i[3:0];						// L1A Window position at LCT*L1A coincidence
 	l1a_cnt_sr[i+1][11:0] <= l1a_rx_counter_plus1[11:0];	// L1As received counter at LCT*L1A coincidence
 	l1a_bxn_sr[i+1][11:0] <= bxn_counter_l1a[11:0];			// BXN counter at LCT*L1A coincidence, has separate offset
 	end	// close if l1a_match
@@ -3052,6 +3140,7 @@
 
 	i=i+1;
 	end	// close while
+	end	// close else
 	end	// close clock
 
 // Extract pushed counters and match results from sr stage after window closed
@@ -3125,14 +3214,14 @@
 	end
 
 	always @(posedge clock) begin
-	if(buf_push) begin
+	if (buf_push) begin
 	deb_buf_push_adr	<=	buf_push_adr;					// Address of write buffer to allocate at last push
 	deb_buf_push_data	<=	buf_push_data;					// L1A data associated with push_adr at last push
 	end
 	end
 
 	always @(posedge clock) begin
-	if(buf_pop) begin
+	if (buf_pop) begin
 	deb_buf_pop_adr		<=	buf_pop_adr;					// Buffer pop address at last xpop
 	deb_buf_pop_data	<=	l1a_rdata;						// Buffer pop data at last xpop
 	end
@@ -3256,8 +3345,6 @@
 // Readout type code depends on selected FIFO mode and whether event buffer data exists
 	reg [1:0] readout_type = 0;					
 
-//	wire	r_buf_good		= (r_wr_buf_ready && r_wr_avail_xl1a && !r_buf_stalled);
-//	wire	r_has_buf		= (r_buf_good && !no_daq);
 	wire	r_has_buf		= r_wr_avail_xl1a;
 	wire	r_has_hdr		= r_wr_avail_xl1a && (!r_l1a_notmb || clct_wr_continuous);
 
@@ -3286,30 +3373,16 @@
 	
 // Latch FIFO list of hit FEBs, set all for full dump, clear all for no dump
 	always @* begin
-	if (full_dump)
-	 begin
-	 cfebs_read = {MXCFEB{1'b1}};
-	 end
-	else if (local_dump)
-	 begin
-	 cfebs_read = active_feb_mux[MXCFEB-1:0];
-	 end
-	else
-	 begin
-	 cfebs_read = 0;
-	 end
+	if      (full_dump ) cfebs_read = {MXCFEB{1'b1}};
+	else if (local_dump) cfebs_read = active_feb_mux[MXCFEB-1:0];
+	else                 cfebs_read = 0;
 	end
 
 // Calculate number of CFEBs in readout
-//	reg [MXCFEBB-1:0] ncfebs;
-//
-//	always @(posedge clock) begin
-//	ncfebs <=  cfebs_read[0] + cfebs_read[1] + cfebs_read[2] + cfebs_read[3] + cfebs_read[4];
-//	end
-
 	wire [MXCFEBB-1:0] ncfebs;
 
-	assign ncfebs =  cfebs_read[0] + cfebs_read[1] + cfebs_read[2] + cfebs_read[3] + cfebs_read[4];
+//	assign ncfebs =  cfebs_read[0] + cfebs_read[1] + cfebs_read[2] + cfebs_read[3] + cfebs_read[4];
+	assign ncfebs =  count1s5(cfebs_read[4:0]);
 
 // Substitute short-header for non buffer events
 	wire [NHBITS-1:0]	r_nheaders;
@@ -3326,13 +3399,13 @@
 	wire include_cfebs		= include_rawhits && (ncfebs!=0);
 	wire include_rpcs		= include_rawhits && rpc_read_enable;
 
-	assign r_nheaders		= (short_header ) ? MNHD    		: MXHD;	// Number of header words
-	assign eef				= (short_header ) ? 4'hE			: 4'h0;	// E0F if have buffers, EEF if no buffer
+	assign r_nheaders		= (short_header ) ? MNHD[NHBITS-1:0]: MXHD[NHBITS-1:0];	// Number of header words
+	assign eef				= (short_header ) ? 4'hE			: 4'h0;				// E0F if have buffers, EEF if no buffer
 
-	assign r_fifo_tbins_cfeb= (include_cfebs) ? fifo_tbins_cfeb : 0;	// Number of time bins in CLCT fifo dump
-	assign r_ncfebs			= (include_cfebs) ? ncfebs	  		: 0;	// Number of CFEBs read
-	assign r_cfebs_read		= (include_cfebs) ? cfebs_read 		: 0;	// CFEBs in readout list
-	assign r_nrpcs_read		= (include_rpcs ) ? rd_nrpcs		: 0;	// RPCs  in readout list
+	assign r_fifo_tbins_cfeb= (include_cfebs) ? fifo_tbins_cfeb : 1'd0;	// Number of time bins in CLCT fifo dump
+	assign r_ncfebs			= (include_cfebs) ? ncfebs	  		: 1'd0;	// Number of CFEBs read
+	assign r_cfebs_read		= (include_cfebs) ? cfebs_read 		: 1'd0;	// CFEBs in readout list
+	assign r_nrpcs_read		= (include_rpcs ) ? rd_nrpcs		: 1'd0;	// RPCs  in readout list
 
 	assign r_fifo_dump		= fifo_dump && (r_ncfebs!=0);				// No CFEB raw hits if no cfebs hit
 
@@ -3348,7 +3421,7 @@
 	else if (read_sm == xheader) header_cnt = header_cnt + 1'b1;	// sync count
 	end
 
-	assign last_header = r_nheaders-1;								// avoid underflow error if r_nheaders=0
+	assign last_header = r_nheaders-1'b1;							// avoid underflow error if r_nheaders=0
 	assign header_done = (header_cnt == last_header);
 
 // DMB transmission frame counter
@@ -3408,11 +3481,11 @@
 	else begin
 	case (read_sm)
 	xstartup:							// Wait in startup for buf_q_empty to update after a reset
-		if(xstartup_done)
+		if (xstartup_done)
 		read_sm = xckstack;
 
 	xckstack:							// Idling, waiting for stack data
-		if(!buf_q_empty && !sync_err_stops_readout)
+		if (!buf_q_empty && !sync_err_stops_readout)
 		read_sm = xdmb;					// Data available
 
 	xdmb:								// Begin send to dmb
@@ -3421,14 +3494,14 @@
 // Header
 	xheader:							// Send header to DMB
 		if (header_done) begin
-		 if(short_header)
+		 if (short_header)
 		 read_sm = xe0f;
 		 else
 		 read_sm = xe0b;
 		end
 
 	xe0b:								// Send EOB marker at end of header
-		if(r_fifo_dump)
+		if (r_fifo_dump)
 		read_sm = xdump;				// Full or Local dump selected and ncfebs!=0
 		else
 		read_sm = xe0c;					// No dump selected or had no buffers
@@ -3515,7 +3588,7 @@
 
 // Filler
 	xe0c:								// Send E0C marker to force even word count
-		if(mod4)						// Word count is already a multiple of 4
+		if (mod4)						// Word count is already a multiple of 4
 		read_sm = xe0f;
 		else							// Word count is only even, need to add 2 frames
 		read_sm = xmod40;
@@ -3538,13 +3611,13 @@
 
 // Trailer
 	xlast:								// Send last word to DMB
-		if(pretrig_halt)				// Pretrig_halt mode
+		if (pretrig_halt)				// Pretrig_halt mode
 		read_sm = xhalt;
 		else							// Pop data off stack
 		read_sm = xpop;					
 
 	xpop:								// Pop data off stack, go back to idle
-		if(xpop_done)
+		if (xpop_done)
 		read_sm = xckstack;
 
 	xhalt:								// Halted, wait for resume
@@ -4199,7 +4272,7 @@
 	reg [MXDMB-1:0] dmb_tx={8'h00,1'b1,6'h00,1'b1,33'h000000000}; // synthesis attribute IOB of dmb_tx is "true";
 
 	always @(posedge clock or posedge startup_blank) begin
-	if(startup_blank) begin					// async preset
+	if (startup_blank) begin					// async preset
 	dmb_tx[14: 0]	<= 0;					// clct data
 	dmb_tx[29:15]	<= 0;					// alct data
 	dmb_tx[30]		<= 0;					// DDU special
@@ -4364,7 +4437,6 @@
 //------------------------------------------------------------------------------------------------------------------
 	wire scp_read_busy;
 	wire scp_trig_discard	= discard_nowrbuf_cnt_en || discard_invp_cnt_en || discard_tmbreject_cnt_en || tmb_nol1a;
-//	wire scp_clear			= buf_pop || (scp_trig_discard && !scp_read_busy);
 	wire scp_clear			= (scp_trig_discard && !scp_read_busy);
 	wire scp_runstop_mux	= (scp_auto) ? !scp_clear : scp_runstop;	// Auto mode over-rides vme runstop
 	wire scp_start_read		= (read_sm == xb05);
@@ -4538,7 +4610,7 @@
 	reg					seq_wr    = 0;
 
 	always @(posedge clock or posedge sm_reset) begin
-	if(sm_reset) begin
+	if (sm_reset) begin
 	seq_wdata	<= 0;
 	seq_wr		<= 0;
 	seq_wadr	<= 0;
@@ -4555,8 +4627,6 @@
 	assign dmb_busy = seq_wr;
 
 // Store DMB raw hits readout word stream: 
-// Sequencer writes port A, VME reads/writes port B
-// Dual port Block RAM 18x4K built from 9x2K+9x2K cascaded to a second bank of 9x2K+9x2K
 	wire [1:0]  seq_wea;
 	wire [1:0]  dmb_web;
 	wire [35:0] dmb_rdata_mux;
@@ -4574,36 +4644,94 @@
 	genvar jdepth;
 	genvar iwidth;
 
+// Dual port Block RAM 18x4K built from 9x2K+9x2K cascaded to a second bank of 9x2K+9x2K
+//  Port A wo written by sequencer
+//  Port B rw read/write by VME
+	
+`ifdef VIRTEX2
+	initial $display("sequencer: generating Virtex2 RAMB16_S9_9 dmb_bram");
+
 	generate
 	for (jdepth=0; jdepth<=1; jdepth=jdepth+1) begin: depth_2x2048
 	for (iwidth=0; iwidth<=1; iwidth=iwidth+1) begin: width_2x9
-	RAMB16_S9_S9 #(								// 2k x 8 + 1 Parity bit Dual-Port RAM
-	.WRITE_MODE_A("WRITE_FIRST"),				// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.WRITE_MODE_B("WRITE_FIRST"),				// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.SIM_COLLISION_CHECK("ALL"))				// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
-	dmb_bram (
-	.ENA	(seq_ena),							// Port A RAM Enable Input
-	.WEA	(seq_wea[jdepth]),					// Port A Write Enable Input
-	.SSRA	(1'b0),								// Port A Synchronous Set/Reset Input
-	.CLKA	(clock),							// Port A Clock
-	.ADDRA	(seq_wadr[10:0]),					// Port A 11-bit Address Input
-	.DIA	(seq_wdata[7+9*iwidth:9*iwidth]),	// Port A 8-bit Data Input
-	.DIPA	(seq_wdata[8+9*iwidth]),			// Port A 1-bit parity Input
-	.DOA	(),									// Port A 8-bit Data Output
-	.DOPA	(seq_dopa[2*jdepth+iwidth]),		// Port A 1-bit Parity Output
 
-	.ENB	(dmb_enb),							// Port B RAM Enable Input
-	.WEB	(dmb_web[jdepth]),					// Port B Write Enable Input
-	.SSRB	(1'b0),								// Port B Synchronous Set/Reset Input
-	.CLKB	(clock),							// Port B Clock
-	.ADDRB	(dmb_adr[10:0]),					// Port B 11-bit Address Input
-	.DIB	(dmb_wdata[7+9*iwidth:9*iwidth]),	// Port B 8-bit Data Input
-	.DIPB	(dmb_wdata[8+9*iwidth]),			// Port-B 1-bit parity Input
-	.DOB	(dmb_rdata_mux[(jdepth*18)+(7+9*iwidth):(jdepth*18)+(9*iwidth)]),	// Port B 8-bit Data Output
-	.DOPB	(dmb_rdata_mux[(jdepth*18)+(8+9*iwidth)]));							// Port B 1-bit Parity Output
+	RAMB16_S9_S9 #(											// 2k x 8 + 1 Parity bit Dual-Port RAM
+	.WRITE_MODE_A		("READ_FIRST"),						// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.WRITE_MODE_B		("READ_FIRST"),						// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.SIM_COLLISION_CHECK("ALL")								// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
+	 ) dmb_bram (
+	.WEA				(seq_wea[jdepth]),					// Port A Write Enable Input
+	.ENA				(seq_ena),							// Port A RAM Enable Input
+	.SSRA				(1'b0),								// Port A Synchronous Set/Reset Input
+	.CLKA				(clock),							// Port A Clock
+	.ADDRA				(seq_wadr[10:0]),					// Port A 11-bit Address Input
+	.DIA				(seq_wdata[7+9*iwidth:9*iwidth]),	// Port A 8-bit Data Input
+	.DIPA				(seq_wdata[8+9*iwidth]),			// Port A 1-bit parity Input
+	.DOA				(),									// Port A 8-bit Data Output
+	.DOPA				(seq_dopa[2*jdepth+iwidth]),		// Port A 1-bit Parity Output
+
+	.WEB				(dmb_web[jdepth]),					// Port B Write Enable Input
+	.ENB				(dmb_enb),							// Port B RAM Enable Input
+	.SSRB				(1'b0),								// Port B Synchronous Set/Reset Input
+	.CLKB				(clock),							// Port B Clock
+	.ADDRB				(dmb_adr[10:0]),					// Port B 11-bit Address Input
+	.DIB				(dmb_wdata[7+9*iwidth:9*iwidth]),	// Port B 8-bit Data Input
+	.DIPB				(dmb_wdata[8+9*iwidth]),			// Port-B 1-bit parity Input
+	.DOB				(dmb_rdata_mux[(jdepth*18)+(7+9*iwidth):(jdepth*18)+(9*iwidth)]),	// Port B 8-bit Data Output
+	.DOPB				(dmb_rdata_mux[(jdepth*18)+(8+9*iwidth)])							// Port B 1-bit Parity Output
+	);
 	end
 	end
 	endgenerate
+
+`else
+	initial $display("sequencer: generating Virtex6 RAMB18E1_S9_S9 dmb_bram");
+
+	assign seq_dopa = 0;											// Port A dummy not needed for Virtex6
+	wire [8:0] db [1:0][1:0];										// Port B dummy for Virtex6, does not need sump
+	
+	generate
+	for (jdepth=0; jdepth<=1; jdepth=jdepth+1) begin: depth_2x2048
+	for (iwidth=0; iwidth<=1; iwidth=iwidth+1) begin: width_2x9
+
+	RAMB18E1 #(														// Virtex6
+	.RAM_MODE			("TDP"),									// SDP or TDP
+ 	.READ_WIDTH_A		(0),										// 0,1,2,4,9,18,36 Read/write width per port
+	.WRITE_WIDTH_A		(9),										// 0,1,2,4,9,18
+	.READ_WIDTH_B		(9),										// 0,1,2,4,9,18
+	.WRITE_WIDTH_B		(9),										// 0,1,2,4,9,18,36
+	.WRITE_MODE_A		("READ_FIRST"),								// WRITE_FIRST, READ_FIRST, or NO_CHANGE
+	.WRITE_MODE_B		("READ_FIRST"),
+	.SIM_COLLISION_CHECK("ALL")										// ALL, WARNING_ONLY, GENERATE_X_ONLY or NONE)
+	) dmb_bram (
+	.WEA				({2{seq_wea[jdepth]}}),						//  2-bit A port write enable input
+	.ENARDEN			(seq_ena),									//  1-bit A port enable/Read enable input
+	.RSTRAMARSTRAM		(1'b0),										//  1-bit A port set/reset input
+	.RSTREGARSTREG		(1'b0),										//  1-bit A port register set/reset input
+	.REGCEAREGCE		(1'b0),										//  1-bit A port register enable/Register enable input
+	.CLKARDCLK			(clock),									//  1-bit A port clock/Read clock input
+	.ADDRARDADDR		({seq_wadr[10:0],3'h7}),					// 14-bit A port address/Read address input 9b->[13:3]
+	.DIADI				({8'h00,seq_wdata[7+9*iwidth:9*iwidth]}),	// 16-bit A port data/LSB data input
+	.DIPADIP			({1'b0,seq_wdata[8+9*iwidth]}),				//  2-bit A port parity/LSB parity input
+	.DOADO				(),											// 16-bit A port data/LSB data output
+	.DOPADOP			(),											//  2-bit A port parity/LSB parity output
+
+	.WEBWE				({4{dmb_web[jdepth]}}),						//  4-bit B port write enable/Write enable input
+	.ENBWREN			(dmb_enb),									//  1-bit B port enable/Write enable input
+	.REGCEB				(1'b0),										//  1-bit B port register enable input
+	.RSTRAMB			(1'b0),										//  1-bit B port set/reset input
+	.RSTREGB			(1'b0),										//  1-bit B port register set/reset input
+	.CLKBWRCLK			(clock),									//  1-bit B port clock/Write clock input
+	.ADDRBWRADDR		({dmb_adr[10:0],3'h7}),						// 14-bit B port address/Write address input 9b->[13:3]
+	.DIBDI				({8'h00,dmb_wdata[7+9*iwidth:9*iwidth]}),	// 16-bit B port data/MSB data input
+	.DIPBDIP			({1'b0,dmb_wdata[8+9*iwidth]}),				//  2-bit B port parity/MSB parity input
+	.DOBDO				({db[jdepth][iwidth][7:0],dmb_rdata_mux[(jdepth*18)+(7+9*iwidth):(jdepth*18)+(9*iwidth)]}),	// 16-bit B port data/MSB data output
+	.DOPBDOP			({db[jdepth][iwidth][8],  dmb_rdata_mux[(jdepth*18)+(8+9*iwidth)]})							//  2-bit B port parity/MSB parity output
+	);
+	end
+	end
+	endgenerate
+`endif
 
 // Multiplex 1st and 2nd RAM banks, delay adr msb 1bx to wait for RAM access
 	reg dmb_adr11_ff=0;
@@ -4637,7 +4765,7 @@
 
 // Write-buffer auto-clear state machine
 	always @(posedge clock or posedge sm_reset) begin
-	if(sm_reset) begin
+	if (sm_reset) begin
 	 cb_sm = cb_startup;
 	 end
 	else begin
@@ -4656,7 +4784,7 @@
 	 cb_sm = cb_wait;
 
 	cb_wait:
-	 if(cb_done)
+	 if (cb_done)
 	 cb_sm = cb_idle;
 
 	default
@@ -4703,6 +4831,131 @@
 	scope_sump		|
 	header_sump;
 
+//------------------------------------------------------------------------------------------------------------------------
+// Prodcedural function to sum number of bits==1 into a binary value - LUT version
+// Returns 	sum1s = (inp[4]+inp[3])+(inp[2]+inp[1]+inp[0]);
+//
+// 01/09/2007 Initial
+// 08/12/2010 Adder version for virtex6 because xst inferred read-only ram instead of luts
+//------------------------------------------------------------------------------------------------------------------------
+// Virtex 6
+//------------------------------------------------------------------------------------------------------------------------
+`ifdef VIRTEX6
+	function [2:0]	count1s5;
+	input	 [4:0]	inp;
+	begin
+	count1s5 = (inp[4]+inp[3])+(inp[2]+inp[1]+inp[0]);
+	end
+	endfunction
+
+//------------------------------------------------------------------------------------------------------------------------
+// Virtex 2
+//------------------------------------------------------------------------------------------------------------------------
+`else
+	function [2:0]	count1s5;
+	input	 [4:0]	inp;
+	reg		 [3:0]	lut;
+	reg		 [2:0]	rom;
+
+	begin
+	case (inp[2:0])			// inp[2:0] sum lsb
+	3'b000:	lut[0] = 0;		// 0
+	3'b001:	lut[0] = 1;		// 1
+	3'b010:	lut[0] = 1;		// 1
+	3'b011:	lut[0] = 0;		// 2
+	3'b100:	lut[0] = 1;		// 1
+	3'b101:	lut[0] = 0;		// 2
+	3'b110:	lut[0] = 0;		// 2
+	3'b111:	lut[0] = 1;		// 3
+	endcase
+
+	case (inp[2:0])			// inp[2:0] sum msb
+	3'b000:	lut[1] = 0;		// 0
+	3'b001:	lut[1] = 0;		// 1
+	3'b010:	lut[1] = 0;		// 1
+	3'b011:	lut[1] = 1;		// 2
+	3'b100:	lut[1] = 0;		// 1
+	3'b101:	lut[1] = 1;		// 2
+	3'b110:	lut[1] = 1;		// 2
+	3'b111:	lut[1] = 1;		// 3
+	endcase
+
+	case (inp[4:3])			// inp[4:3] sum lsb
+	2'b00:	lut[2] = 0;		// 0
+	2'b01:	lut[2] = 1;		// 1
+	2'b10:	lut[2] = 1;		// 1
+	2'b11:	lut[2] = 0;		// 2
+	endcase
+
+	case (inp[4:3])			// inp[4:3] sum msb
+	2'b00:	lut[3] = 0;		// 0
+	2'b01:	lut[3] = 0;		// 1
+	2'b10:	lut[3] = 0;		// 1
+	2'b11:	lut[3] = 1;		// 2
+	endcase
+
+	case (lut[3:0])			// sum lut[3:2]+lut[1:0] bit 0
+	4'b0000: rom[0] = 0;	// 0 000
+	4'b0001: rom[0] = 1;	// 1 001
+	4'b0010: rom[0] = 0;	// 2 010
+	4'b0011: rom[0] = 1;	// 3 011
+	4'b0100: rom[0] = 1;	// 1 001
+	4'b0101: rom[0] = 0;	// 2 010
+	4'b0110: rom[0] = 1;	// 3 011
+	4'b0111: rom[0] = 0;	// 4 100
+	4'b1000: rom[0] = 0;	// 2 010
+	4'b1001: rom[0] = 1;	// 3 011
+	4'b1010: rom[0] = 0;	// 4 100
+	4'b1011: rom[0] = 1;	// 5 100
+	4'b1100: rom[0] = 1;	// 3 011
+	4'b1101: rom[0] = 0;	// 4 100
+	4'b1110: rom[0] = 1;	// 5 101
+	4'b1111: rom[0] = 0;	// 6 110
+	endcase
+
+	case (lut[3:0])			// sum lut[3:2]+lut[1:0] bit 1
+	4'b0000: rom[1] = 0;	// 0 000
+	4'b0001: rom[1] = 0;	// 1 001
+	4'b0010: rom[1] = 1;	// 2 010
+	4'b0011: rom[1] = 1;	// 3 011
+	4'b0100: rom[1] = 0;	// 1 001
+	4'b0101: rom[1] = 1;	// 2 010
+	4'b0110: rom[1] = 1;	// 3 011
+	4'b0111: rom[1] = 0;	// 4 100
+	4'b1000: rom[1] = 1;	// 2 010
+	4'b1001: rom[1] = 1;	// 3 011
+	4'b1010: rom[1] = 0;	// 4 100
+	4'b1011: rom[1] = 0;	// 5 101
+	4'b1100: rom[1] = 1;	// 3 011
+	4'b1101: rom[1] = 0;	// 4 100
+	4'b1110: rom[1] = 0;	// 5 101
+	4'b1111: rom[1] = 1;	// 6 110
+	endcase
+
+	case (lut[3:0])			// sum lut[3:2]+lut[1:0] bit 2
+	4'b0000: rom[2] = 0;	// 0 000
+	4'b0001: rom[2] = 0;	// 1 001
+	4'b0010: rom[2] = 0;	// 2 010
+	4'b0011: rom[2] = 0;	// 3 011
+	4'b0100: rom[2] = 0;	// 1 001
+	4'b0101: rom[2] = 0;	// 2 010
+	4'b0110: rom[2] = 0;	// 3 011
+	4'b0111: rom[2] = 1;	// 4 100
+	4'b1000: rom[2] = 0;	// 2 010
+	4'b1001: rom[2] = 0;	// 3 011
+	4'b1010: rom[2] = 1;	// 4 100
+	4'b1011: rom[2] = 1;	// 5 101
+	4'b1100: rom[2] = 0;	// 3 011
+	4'b1101: rom[2] = 1;	// 4 100
+	4'b1110: rom[2] = 1;	// 5 101
+	4'b1111: rom[2] = 1;	// 6 110
+	endcase
+
+	count1s5=rom;
+	end
+	endfunction
+`endif
+
 //-------------------------------------------------------------------------------------------------------------------
 // Debug Simulation state machine display
 //-------------------------------------------------------------------------------------------------------------------
@@ -4712,7 +4965,7 @@
 	reg        deb_dmb_nwr = 0;
 	
 	always @(posedge clock or posedge startup_blank) begin
-	if(startup_blank) begin					// async preset
+	if (startup_blank) begin					// async preset
 	deb_dmb_tx[15:0]<= 0;					// fifo data
 	deb_dmb_nwr		<= 1;
 	end

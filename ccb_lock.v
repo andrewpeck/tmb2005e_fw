@@ -1,9 +1,13 @@
 `timescale 1ns / 1ps
+//`define DEBUG_CCB_LOCK 1
 //-------------------------------------------------------------------------------------------------------------------
 // Monitors TTC PLL lock signals from CCB
 //
-// 08/27/08	Initial
-// 04/22/09	Add sm recovery state
+//	08/27/08 Initial
+//	04/22/09 Add sm recovery state
+//	07/23/10 Port to ise 12
+//	07/26/10 Change to non-blocking operators
+//	07/28/10 Change integer lengths
 //-------------------------------------------------------------------------------------------------------------------
 	module ccb_lock
 	(	
@@ -13,6 +17,8 @@
 	lock_never,
 	lost_ever,
 	lost_cnt
+
+`ifdef DEBUG_CCB_LOCK , lock_sm_dsp `endif
 	);
 
 // Ports
@@ -34,19 +40,19 @@
 	initial lock_sm = wait_lock;
 
 	always @(posedge clock) begin
-	if(reset)lock_sm = wait_lock;
+	if (reset)  lock_sm <= wait_lock;
 	else begin
 	case (lock_sm)
 
 	wait_lock:
-	 if (lock)	lock_sm	= have_lock;
+	 if (lock)	lock_sm	<= have_lock;
 
 	have_lock:
-	 if (!lock)	lock_sm	= lost_lock;
+	 if (!lock)	lock_sm	<= lost_lock;
 
-	lost_lock:	lock_sm = wait_lock;
+	lost_lock:	lock_sm <= wait_lock;
 
-	default		lock_sm	= wait_lock;
+	default		lock_sm	<= wait_lock;
 	endcase
 	end
 	end
@@ -64,13 +70,13 @@
 // Lock lost count
 	reg [7:0] lost_cnt=0;
 	
-	wire ovf    = (lost_cnt==8'hFF);
-	wire lost   = (lock_sm==lost_lock);
+	wire ovf    = (lost_cnt == 8'hFF);
+	wire lost   = (lock_sm  == lost_lock);
 	wire cnt_en =  lost && !ovf;
 
 	always @(posedge clock) begin
 	if		(reset ) lost_cnt <= 0;
-	else if (cnt_en) lost_cnt <= lost_cnt+1;
+	else if (cnt_en) lost_cnt <= lost_cnt+1'b1;
 	end
 
 // Lock ever lost, at least once
@@ -80,6 +86,21 @@
 	if		(reset) lost_ever <= 0;
 	else if	(lost ) lost_ever <= 1;
 	end
+
+// Debug
+`ifdef DEBUG_CCB_LOCK
+	output [39:0] lock_sm_dsp;
+	reg    [39:0] lock_sm_dsp;
+
+	always @* begin
+	case (lock_sm)
+	wait_lock:	lock_sm_dsp <= "wait";
+	have_lock:	lock_sm_dsp <= "have";
+	lost_lock:	lock_sm_dsp <= "lost";
+	default		lock_sm_dsp <= "errs";
+	endcase
+	end
+`endif
 
 //-------------------------------------------------------------------------------------------------------------------
 	endmodule

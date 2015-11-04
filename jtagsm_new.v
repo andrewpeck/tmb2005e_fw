@@ -79,6 +79,7 @@
 //	07/07/08 Mod state machine resets
 //	07/08/08 Mod status clearing
 //	01/12/09 Mod for ISE 10.1i
+//	08/24/10 Port to ise 12, non blocking operators, replace sim prom tristate logic
 //-----------------------------------------------------------------------------------------------------------------
 	module jtagsm_new
 	(
@@ -237,13 +238,11 @@
 	input	[3:0]	throttle;			// JTAG speed control, 0=fastest
 
 // PROM
-`ifndef DEBUG_JTAGSM_NEW 
+	`ifndef DEBUG_JTAGSM_NEW 
 	input	[7:0]	prom_data;			// Data input from PROM
-`else
-	output	[7:0]	prom_data;			// Data input from simulator ROM
-	wire	[7:0]	rom_data;
-	assign			prom_data = rom_data;
-`endif
+	`else
+	inout	[7:0]	prom_data;			// Data input from simulator ROM
+	`endif
 	output			prom_clk;			// prom_ctrl[0]
 	output			prom_oe;			// prom_ctrl[1]
 	output			prom_nce;			// prom_ctrl[2]
@@ -380,7 +379,7 @@
 // Local
 //-----------------------------------------------------------------------------------------------------------------
 // State Machine declarations
-	reg	[3:0] prom_sm;
+	reg	[9:0] prom_sm;
 
 	parameter wait_dll		=	4'h0;
 	parameter wait_vme		=	4'h1;
@@ -396,7 +395,7 @@
 	// synthesis attribute safe_implementation of prom_sm is "yes";
 	// synthesis attribute init                of prom_sm is "wait_dll";
 
-	reg	[2:0] format_sm;
+	reg	[6:0] format_sm;
 
 	parameter wait_prom		=	3'h0;
 	parameter check_header	=	3'h1;
@@ -409,7 +408,7 @@
 	// synthesis attribute safe_implementation of format_sm is "yes";
 	// synthesis attribute init                of format_sm is "wait_prom";
 
-	reg	[1:0] jtag_sm;
+	reg	[2:0] jtag_sm;
 
 	parameter wait_format	=	2'h0;
 	parameter tck_low		=	2'h1;
@@ -428,10 +427,10 @@
 	reg	autostart_ff= 0;
 
 	always @(posedge clock) begin
-	power_up_ff		<= power_up;
-	vme_ready_ff	<= vme_ready;
-	start_ff		<= start;
-	autostart_ff	<= autostart;
+	power_up_ff  <= power_up;
+	vme_ready_ff <= vme_ready;
+	start_ff     <= start;
+	autostart_ff <= autostart;
 	end
 
 // Signal busy if not idling or waiting for unstart
@@ -460,48 +459,48 @@
 
 	always @(posedge clock) begin
 	if (idle_prom) begin						// PROM case 1: powered down
-	prom_clk = 0;	// 0=take clk low for idling
-	prom_oe	 = 0;	// 0=reset address, outputs disabled
-	prom_nce = 1;	// 1=chip not selected
+	prom_clk <= 0;	// 0=take clk low for idling
+	prom_oe	 <= 0;	// 0=reset address, outputs disabled
+	prom_nce <= 1;	// 1=chip not selected
 	end
 	else if (clear_adr) begin					// PROM case 2: enabled, clearing address
-	prom_clk = 0;	// 0=take clock low, it was prolly idle high
-	prom_oe	 = 0;	// 0=reset address, outputs disabled
-	prom_nce = 0;	// 0=chip selected
+	prom_clk <= 0;	// 0=take clock low, it was prolly idle high
+	prom_oe	 <= 0;	// 0=reset address, outputs disabled
+	prom_nce <= 0;	// 0=chip selected
 	end
 	else if (taccess) begin						// PROM case 3: enabled, read adr 0
-	prom_clk = 0;	// 0=take clock low, it was prolly idle high
-	prom_oe	 = 1;	// 0=reset address, outputs disabled
-	prom_nce = 0;	// 0=chip selected
+	prom_clk <= 0;	// 0=take clock low, it was prolly idle high
+	prom_oe	 <= 1;	// 0=reset address, outputs disabled
+	prom_nce <= 0;	// 0=chip selected
 	end
 	else if (next_adr) begin					// PROM case 4: enabled, clock=1
-	prom_clk = 1;	// 1=advance address
-	prom_oe	 = 1;	// 1=outputs enabled
-	prom_nce = 0;	// 0=chip selected
+	prom_clk <= 1;	// 1=advance address
+	prom_oe	 <= 1;	// 1=outputs enabled
+	prom_nce <= 0;	// 0=chip selected
 	end
 	else begin									// PROM case 5: enabled, clock=0
-	prom_clk = 0;	// 0=hold address
-	prom_oe	 = 1;	// 1=outputs enabled
-	prom_nce = 0;	// 0=chip selected
+	prom_clk <= 0;	// 0=hold address
+	prom_oe	 <= 1;	// 1=outputs enabled
+	prom_nce <= 0;	// 0=chip selected
 	end
 	end
 
 // Latch PROM data and address, 512K PROMs have 512K/8=64K addresses
 	reg [ 7:0] prom_data_ff = 0;
-	reg [15:0] wdcnt = 0;
+	reg [15:0] wdcnt        = 0;
 
-	wire clear_prom_data = (prom_sm==wait_dll)||(prom_sm==init)||sreset;
-	wire latch_prom_data = (prom_sm==latch_prom);
-	wire hold_prom_adr   = (prom_sm==hold_adr);
+	wire clear_prom_data = (prom_sm == wait_dll  ) || (prom_sm==init) || sreset;
+	wire latch_prom_data = (prom_sm == latch_prom);
+	wire hold_prom_adr   = (prom_sm == hold_adr  );
 
 	always @(posedge clock) begin
-	if(clear_prom_data)	begin
+	if (clear_prom_data)	begin
 	prom_data_ff	<= 0;
 	wdcnt			<= 0;
 	end
-	if(latch_prom_data)	begin
+	if (latch_prom_data)	begin
 	prom_data_ff	<= prom_data;
-	wdcnt			<= wdcnt+1;
+	wdcnt			<= wdcnt+1'b1;
 	end
 	end
 
@@ -532,8 +531,8 @@
 	wire init_done   = (init_cnt == init_fullscale);
 
 	always @(posedge clock) begin
-	if (init_cnt_en) init_cnt = init_cnt+1;
-	else 			 init_cnt = 0;
+	if (init_cnt_en) init_cnt <= init_cnt+1'b1;
+	else 			 init_cnt <= 0;
 	end
 
 // Address reset delay counter asserts reset 250nS per Xilinx datasheet
@@ -543,8 +542,8 @@
 	wire reset_done   = (reset_cnt == 10);
 
 	always @(posedge clock) begin
-	if (reset_cnt_en) reset_cnt = reset_cnt+1;
-	else			  reset_cnt = 0;
+	if (reset_cnt_en) reset_cnt <= reset_cnt+1'b1;
+	else			  reset_cnt <= 0;
 	end
 
 // Access delay counter waits for PROM output after oe enabled
@@ -554,8 +553,8 @@
 	wire taccess_done   = (taccess_cnt == 2);
 
 	always @(posedge clock) begin
-	if (taccess_cnt_en) taccess_cnt = taccess_cnt+1;
-	else				taccess_cnt = 0;
+	if (taccess_cnt_en) taccess_cnt <= taccess_cnt+1'b1;
+	else				taccess_cnt <= 0;
 	end
 
 // PROM Word Pointers
@@ -573,20 +572,20 @@
 
 	wire [15:0] full_chain_words	= tck_cnt/4;		// Number of full jtag data bytes in this chain
 	wire        partial_chain_words = |tck_cnt[1:0];	// Number of partial jtag data bytes, either 0 or 1
-	wire [15:0] nchain_words = full_chain_words+partial_chain_words;
+	wire [15:0] nchain_words        = full_chain_words+partial_chain_words;
 
 	always @(posedge clock) begin
-	if      (clear_prom_data ) next_chain_word <= 16'h0011;							// Point to 1st byte after header
-	else if (next_chain_latch) next_chain_word <= next_chain_word+3+nchain_words;	// Point to next chain marker
+	if      (clear_prom_data ) next_chain_word <= 16'h0011;								// Point to 1st byte after header
+	else if (next_chain_latch) next_chain_word <= next_chain_word+16'd3+nchain_words;	// Point to next chain marker
 	end
 
 	always @(posedge clock) begin
-	if      (clear_prom_data) last_word <= 16'hFFFF;			// Point to last prom byte
-	else if (last_word_latch) last_word <= next_chain_word+6;	// Point to last trailer word
+	if      (clear_prom_data) last_word <= 16'hFFFF;				// Point to last prom byte
+	else if (last_word_latch) last_word <= next_chain_word+16'd6;	// Point to last trailer word
 	end
 
-	assign chain_ready	= (wdcnt==next_chain_word);				// Reached next chain adddress
-	assign prom_end		= (wdcnt==last_word) || aborted;		// Reached last prom  address
+	assign chain_ready	= (wdcnt==next_chain_word);					// Reached next chain adddress
+	assign prom_end		= (wdcnt==last_word) || aborted;			// Reached last prom  address
 
 // PROM read fetch speed select, fast thru header, slow thru jtag bytes
 	wire fetch_done;
@@ -595,20 +594,20 @@
 	wire inc_adr_slow  = !(header_frame||trailer_frame);
 	wire inc_adr_fast  = !inc_adr_slow || (chain_end || chain_ending);
 	
-	assign next_adr_en = (inc_adr_fast) ? 1 : fetch_done;
+	assign next_adr_en = (inc_adr_fast) ? 1'b1 : fetch_done;
 
 // PROM read fetch speed defines JTAG tck period, wait 100ns per tck + 2*4*throttle
 	parameter  fetch_min = 16-3;	// 400ns per prom byte, throttle=0, 3bx overhead subtracted
 	reg	 [7:0] fetch_cnt = 0;
 	wire [7:0] fetch_max;
 
-	wire   fetch_cnt_en = hold_prom_adr && inc_adr_slow;
-	wire   fetch_cnt_clr= inc_adr_fast||latch_prom_data;
-	assign fetch_max    = fetch_min+8*throttle;	// tck=1 add 1bx, tck=0 add 1bx, 4tck/byte=add 8bx
+	wire   fetch_cnt_en  = hold_prom_adr && inc_adr_slow;
+	wire   fetch_cnt_clr = inc_adr_fast||latch_prom_data;
+	assign fetch_max     = fetch_min+(throttle<<3);			// fetch_min+8*(throttle, tck=1 add 1bx, tck=0 add 1bx, 4tck/byte=add 8bx
 
 	always @(posedge clock) begin
-	if 		(fetch_cnt_clr)	fetch_cnt=0;
-	else if (fetch_cnt_en )	fetch_cnt=fetch_cnt+1;
+	if 		(fetch_cnt_clr)	fetch_cnt <= 0;
+	else if (fetch_cnt_en )	fetch_cnt <= fetch_cnt+1'b1;
 	end
 
 	assign fetch_done = (fetch_cnt==fetch_max);
@@ -622,7 +621,7 @@
 	wire   trailer_clear	= !trailer_frame;
 
 	always @(posedge clock)begin
-	if (load_trailer_cnt) begin
+	if   (load_trailer_cnt) begin
 	case (trailer_cnt)
 	3'd0:	tckcnt_prom[17:16]	<= prom_data_ff[1:0];
 	3'd1:	tckcnt_prom[15:8]	<= prom_data_ff[7:0];
@@ -631,7 +630,7 @@
 	3'd4:	wdcnt_prom[7:0]		<= prom_data_ff[7:0];
 	3'd5:	cksum_prom[7:0]		<= prom_data_ff[7:0];
 	endcase
-	trailer_cnt <= trailer_cnt+1;
+	trailer_cnt <= trailer_cnt+1'b1;
 	end
 	else if (trailer_clear)
 	trailer_cnt	<= 0;
@@ -686,7 +685,7 @@
 	else begin
 	if (latch_headerid) header_ok <= header_marker;
 	if (latch_chainid ) chain_ok  <= chain_marker;
-	if (latch_status) begin
+	if (latch_status  ) begin
 	tckcnt_ok	<= (tck_total_cnt == tckcnt_prom);
 	wdcnt_ok	<= (wdcnt == wdcnt_prom);
 	cksum_ok	<= (cksum == cksum_prom);
@@ -714,8 +713,8 @@
 	wire tck_fpga_cnt_en   = tck_fpga_ticked && !tck_fpga_cnt_done;
 
 	always @(posedge clock) begin
-	if (clear_status)	tck_fpga_cnt = 0;
-	if (tck_fpga_cnt_en)tck_fpga_cnt = tck_fpga_cnt+1;
+	if (clear_status)	tck_fpga_cnt <= 0;
+	if (tck_fpga_cnt_en)tck_fpga_cnt <= tck_fpga_cnt+1'b1;
 	end
 	
 	assign tck_fpga_cnt_ok = (tck_fpga_cnt != 0);					// At least one tick looped back
@@ -727,7 +726,7 @@
 
 	always @(posedge clock) begin
 	if (clear_status) aborted <= 0;
-	aborted <= oh_noes || aborted;
+	else              aborted <= oh_noes || aborted;
 	end
 
 	assign reset_prom = (sreset || aborted || (jtag_sm == abend)) && !((prom_sm == unstart) || (prom_sm == idle));
@@ -739,48 +738,48 @@
 //  PROM-Reader State Machine inits PROM, steps through addresses according to next_adr from jtag machine
 //-----------------------------------------------------------------------------------------------------------------
 	always @(posedge clock) begin
-	if		(global_reset)	prom_sm = wait_dll;
-	else if	(reset_prom)	prom_sm = unstart;
+	if		(global_reset)	prom_sm <= wait_dll;
+	else if	(reset_prom)	prom_sm <= unstart;
 	else begin
 
 	case (prom_sm)
 	
 	wait_dll:										// Wait for FPGA DLLs to lock
-	 if (power_up_ff)	prom_sm = wait_vme;			// FPGA is ready
+	 if (power_up_ff)	prom_sm <= wait_vme;		// FPGA is ready
 
 	wait_vme:										// Wait for VME registers to load
 	 if (vme_ready_ff)								// VME loaded from PROM
 	 begin
-	 if (autostart_ff)	prom_sm = init;				// Start cycle if autostart enabled
-	 else				prom_sm = idle;				// Otherwise stay idle
+	 if (autostart_ff)	prom_sm <= init;			// Start cycle if autostart enabled
+	 else				prom_sm <= idle;			// Otherwise stay idle
 	 end
 
 	idle:											// Wait for VME command to program, power down PROM
-	 if (start_ff)		prom_sm = init;				// Start arrived
+	 if (start_ff)		prom_sm <= init;			// Start arrived
 
 	init:
-	 if (init_done)		prom_sm = reset_adr;		// Power up PROM, 2uS delay
+	 if (init_done)		prom_sm <= reset_adr;		// Power up PROM, 2uS delay
 
 	reset_adr:
-	 if (reset_done)	prom_sm = prom_taccess;		// Reset PROM address, 250nS delay
+	 if (reset_done)	prom_sm <= prom_taccess;	// Reset PROM address, 250nS delay
 	
 	prom_taccess:
-	 if (taccess_done)	prom_sm = latch_prom;		// Release reset, wait for output to assert 10ns minimum
+	 if (taccess_done)	prom_sm <= latch_prom;		// Release reset, wait for output to assert 10ns minimum
 
 	latch_prom:										// Latch PROM data
-	 if     (prom_end)	prom_sm = unstart;			// First-word marker missing or hit end of PROM data
-	 else if(next_adr)	prom_sm = inc_adr;			// Fast mode: go to next adr
-	 else				prom_sm = hold_adr;			// Slow mode: hold current address until jtag byte scan is complete
+	 if     (prom_end)	prom_sm <= unstart;			// First-word marker missing or hit end of PROM data
+	 else if(next_adr)	prom_sm <= inc_adr;			// Fast mode: go to next adr
+	 else				prom_sm <= hold_adr;			// Slow mode: hold current address until jtag byte scan is complete
 	 
 	hold_adr:										// Hold current address until jtag byte scan is complete
-	 if(next_adr)		prom_sm = inc_adr;			// Tis complete
+	 if(next_adr)		prom_sm <= inc_adr;			// Tis complete
 
-	inc_adr:			prom_sm = latch_prom;		// Increment PROM address
+	inc_adr:			prom_sm <= latch_prom;		// Increment PROM address
 
 	unstart:
-	 if(goto_idle)		prom_sm = idle;				// Wait for VME write command to go away
+	 if(goto_idle)		prom_sm <= idle;			// Wait for VME write command to go away
 
-	default				prom_sm = wait_dll;
+	default				prom_sm <= wait_dll;
 	endcase
 	end
 	end
@@ -877,12 +876,12 @@
 	assign chain_ending  =  chain_exit && chain_latch;	// Last chain marker lookahead
 
 	always @(posedge clock) begin
-	if(clear_status) begin
+	if (clear_status) begin
 	chain_sel     <= 4'hC;
 	hold_tck_high <= 1;
 	chain_end	  <= 0;
 	end
-	if(chain_latch) begin 
+	if (chain_latch) begin 
 	chain_sel     <= chain_adr;		// New chain adr
 	hold_tck_high <= hold_tck_flag;	// New tck mode
 	chain_end	  <= chain_exit;	// Reached last chain address
@@ -909,20 +908,20 @@
 	wire format_ready = next_chain_latch;
 
 // Count TCKs sent
-	reg [15:0]	tck_sent_cnt	= 0;	// TCKs sent this chain
+	reg [15:0] tck_sent_cnt=0;	// TCKs sent this chain
 
 	wire throttle_done;
 	wire tck_low_done;
 	wire tck_high_done;
 
 	always @(posedge clock) begin
-	if		(clear_status ) tck_total_cnt = 0;
-	else if	(tck_high_done) tck_total_cnt = tck_total_cnt+1;
+	if		(clear_status ) tck_total_cnt <= 0;
+	else if	(tck_high_done) tck_total_cnt <= tck_total_cnt+1'b1;
 	end
 
 	always @(posedge clock) begin
-	if		(format_ready ) tck_sent_cnt = 0;
-	else if	(tck_high_done) tck_sent_cnt = tck_sent_cnt+1;
+	if		(format_ready ) tck_sent_cnt <= 0;
+	else if	(tck_high_done) tck_sent_cnt <= tck_sent_cnt+1'b1;
 	end
 
 	wire tck_cnt_done = (tck_sent_cnt == tck_cnt);
@@ -935,7 +934,7 @@
 	end
 
 // Select TDI,TMS pair pointed to by scan counter, could use shift reg here but incur clocking delay
-	assign tck_scan = (jtag_sm == tck_high);
+	assign tck_scan       =  (jtag_sm == tck_high);
 	assign tck_scan_valid = ((jtag_sm == tck_high)||(jtag_sm == tck_low)) && !tck_cnt_done;
 	
 	always @* begin
@@ -948,7 +947,7 @@
 	end
 
 // JTAG speed throttle
-	parameter throttle_min = 1;	// Adds 1bx minimum to throttle timer, so tck persists at least 2bx
+	parameter  throttle_min = 4'd1;	// Adds 1bx minimum to throttle timer, so tck persists at least 2bx
 	reg	 [3:0] throttle_cnt = 0;
 	wire [3:0] throttle_max;
 
@@ -956,8 +955,8 @@
 	assign throttle_max    = throttle+throttle_min;
 
 	always @(posedge clock) begin
-	if (throttle_cnt_en)throttle_cnt = throttle_cnt+1;
-	else				throttle_cnt = 0;
+	if (throttle_cnt_en) throttle_cnt <= throttle_cnt+1'b1;
+	else                 throttle_cnt <= 0;
 	end
 
 	assign throttle_done = (throttle_cnt == throttle_max);
@@ -968,39 +967,39 @@
 // PROM Format State Machine interprets embedded PROM chain blocks
 //-----------------------------------------------------------------------------------------------------------------
 	always @(posedge clock) begin
-	if		(global_reset)	format_sm = wait_prom;
-	else if	(sreset)		format_sm = wait_prom;
+	if		(global_reset)	format_sm <= wait_prom;
+	else if	(sreset)		format_sm <= wait_prom;
 	else begin
 
 	case (format_sm)
 	
 	wait_prom:											// Wait for PROM to read adr 0
-	 if (prom_ready)		format_sm = check_header;	// Adr 0 has been read
+	 if (prom_ready)		format_sm <= check_header;	// Adr 0 has been read
 
 	check_header:										// Check 1st header frame is correct
-	 if (header_marker)		format_sm = wait_chain;		// Tis
-	 else					format_sm = abend;			// Tisnt
+	 if (header_marker)		format_sm <= wait_chain;	// Tis
+	 else					format_sm <= abend;			// Tisnt
 
 	wait_chain:											// Wait for PROM to read next chain marker
-	 if (chain_ready)		format_sm = load_chain;		// Reached chain location
+	 if (chain_ready)		format_sm <= load_chain;		// Reached chain location
 
 	load_chain:											// Load chain adr and marker
-	 if(latch_prom_data) begin
-	 if (chain_exit)		format_sm = wait_prom;		// No more chains left
+	 if (latch_prom_data) begin
+	 if (chain_exit)		format_sm <= wait_prom;		// No more chains left
 	 else if
-	    (chain_marker)		format_sm = load_tckcnt0;	// Chain adr and marker are OK, begin jtag scan
-	 else					format_sm = abend;			// Marker error detected
+	    (chain_marker)		format_sm <= load_tckcnt0;	// Chain adr and marker are OK, begin jtag scan
+	 else					format_sm <= abend;			// Marker error detected
 	end
 
 	load_tckcnt0:										// Load 1st TCK count frame
-	 if (latch_prom_data)	format_sm = load_tckcnt1;	// Wait for PROM data latch
+	 if (latch_prom_data)	format_sm <= load_tckcnt1;	// Wait for PROM data latch
 
 	load_tckcnt1:
-	 if (latch_prom_data)	format_sm = wait_chain;		// All tck count frames loaded
+	 if (latch_prom_data)	format_sm <= wait_chain;	// All tck count frames loaded
 
-	abend:					format_sm = wait_prom;		// Error in PROM format detected
+	abend:					format_sm <= wait_prom;		// Error in PROM format detected
 
-	default					format_sm = wait_prom;		// Initial state
+	default					format_sm <= wait_prom;		// Initial state
 	endcase
 	end
 	end
@@ -1025,25 +1024,25 @@
 // JTAG Data Shift State Machine
 //-----------------------------------------------------------------------------------------------------------------
 	always @(posedge clock) begin
-	if		(global_reset)	jtag_sm = wait_format;
-	else if	(sreset)		jtag_sm = wait_format;
+	if		(global_reset)	jtag_sm <= wait_format;
+	else if	(sreset)		jtag_sm <= wait_format;
 	else begin
 
 	case (jtag_sm)
 	
 	wait_format:									// Wait for format machine to load a chain block
-	 if (format_ready)	jtag_sm = tck_low;			// Chain block loaded
+	 if (format_ready)	jtag_sm <= tck_low;			// Chain block loaded
 
 	tck_low:										// Set tck low, assert tms,tdi
 	 if (tck_low_done) begin						// Holding tck low until throttle done
-	 if (tck_cnt_done)	jtag_sm = wait_format;		// Finished current chain
-	 else				jtag_sm = tck_high;			// Go to tck high
+	 if (tck_cnt_done)	jtag_sm <= wait_format;		// Finished current chain
+	 else				jtag_sm <= tck_high;			// Go to tck high
 	 end
 
 	tck_high:										// Set tck high, hold tms, tdi
-	 if (tck_high_done)	jtag_sm = tck_low;			// Holding tck high until throttle done
+	 if (tck_high_done)	jtag_sm <= tck_low;			// Holding tck high until throttle done
 
-	default				jtag_sm = wait_format;		// Initial state
+	default				jtag_sm <= wait_format;		// Initial state
 	endcase
 	end
 	end
@@ -1087,11 +1086,11 @@
 	reg	 [2:0] prom_case = 0;
 
 	always @(posedge clock) begin
-	if		(idle_prom)	prom_case=1;		// PROM powered down
-	else if (clear_adr) prom_case=2;		// PROM enabled, clearing address
-	else if (taccess)	prom_case=3;		// PROM enabled, accessing adr 0
-	else if (next_adr)	prom_case=4;		// PROM enabled, clock=1
-	else 				prom_case=5;		// PROM enabled, clock=0
+	if		(idle_prom)	prom_case <= 1;		// PROM powered down
+	else if (clear_adr) prom_case <= 2;		// PROM enabled, clearing address
+	else if (taccess)	prom_case <= 3;		// PROM enabled, accessing adr 0
+	else if (next_adr)	prom_case <= 4;		// PROM enabled, clock=1
+	else 				prom_case <= 5;		// PROM enabled, clock=0
 	end
 
 // Format State Machine ASCII display
@@ -1146,8 +1145,8 @@
 	reg inc_adr_en=0;
 
 	always @(posedge clock) begin
-	if(!clk)	inc_adr_en	<= 1;
-	else		inc_adr_en <= clk && !inc_adr_en;
+	if (!clk) inc_adr_en <= 1;
+	else      inc_adr_en <= clk && !inc_adr_en;
 	end
 
 	wire inc_adr_rom = clk && inc_adr_en;
@@ -1155,8 +1154,8 @@
 	wire adr_reset = !oe || nce;		// Reset adr if oe=0 or nce=1
 
 	always @(posedge clock or posedge adr_reset) begin
-	if		(adr_reset)		adr=0;
-	else if (inc_adr_rom)	adr=adr+1;
+	if		(adr_reset)		adr = 0;
+	else if (inc_adr_rom)	adr = adr+1'b1;
 	end
 
 // Loop up PROM data at adr
@@ -1198,7 +1197,7 @@
 	assign rom[16'h0020]	= 8'hFF;				// Last word marker
 
 // Tri-state rom output
-	assign rom_data = (adr_reset) ? 8'hzz : rom[adr];
+	assign prom_data = (adr_reset) ? 8'hzz : rom[adr];
 
 // Checksum
 	wire [7:0] sum [CKADR-1:0];

@@ -6,6 +6,7 @@
 //	04/28/10 Add forced sync error for system test
 //	05/12/10 Add clock_lock_lost error type
 //	05/12/10 Separate clct_bx0 sync error because it clears long after ttc_resync
+//	08/17/10 Port to ISE 12
 //----------------------------------------------------------------------------------------------------------------
 
 	module sync_err_ctrl

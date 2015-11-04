@@ -39,6 +39,12 @@
 //	04/29/10 Add FF to bx0 emulator
 //	05/13/10 Remove resync from bx0 emulator, add inits to fmm state shadow ff and trig stop ff
 //	06/30/10 Mod injector RAM for alct and l1a bits
+//	07/23/10 Port to ise 12, arithmetic mods, fix sump OR
+//	07/26/10 Add iob attribute for dmb_rx and _ccb_tx
+//	07/26/10 Change to non-blocking operators on l1a_sm
+//	08/19/10 Replace * with &
+//	11/12/10 Invert oe and fanout ccb_tx bus to prevent inverter packing in ilogic block ise 12 warning in map
+//	12/01/10 Add virtex2 opt out for oe keep
 //------------------------------------------------------------------------------------------------------------------
 	module ccb
 	(
@@ -155,6 +161,9 @@
 	,sm_reset
 	,fmm_sm_disp
 	,l1a_sm_disp
+	,tmb_l1a_request
+	,int_l1a_request
+	,tmb_l1a_request_mux
 `endif
 	);
 	
@@ -162,6 +171,7 @@
 // Constants:
 //------------------------------------------------------------------------------------------------------------------
 	parameter MXBXN		=	12;					// Number BXN bits, LHC bunchs numbered 0 to 3563
+	`include "firmware_version.v"
 
 //------------------------------------------------------------------------------------------------------------------
 // CCB Ports
@@ -278,6 +288,9 @@
 	output				sm_reset;				// State machine reset
 	output	[55:0]		fmm_sm_disp;			// FMM machine state ascii display
 	output	[55:0]		l1a_sm_disp;			// L1A machine state ascii display
+	output				tmb_l1a_request;
+	output				int_l1a_request;
+	output				tmb_l1a_request_mux;
 `endif
 
 //------------------------------------------------------------------------------------------------------------------
@@ -425,7 +438,7 @@
 	assign ccb_cmd[7:0]			= (vme_ccb_cmd_enable) ? vme_ccb_cmd_ff[7:0]		: ccb_cmd_mux[7:0];
 	assign ccb_cmd_strobe		= (vme_ccb_cmd_enable) ? vme_ccb_cmd_strobe_os		: ccb_cmd_strobe_gtl;
 	assign ccb_data_strobe		= (vme_ccb_cmd_enable) ? vme_ccb_data_strobe_os		: ccb_data_strobe_gtl;
-	assign ccb_subaddr_strobe	= (vme_ccb_cmd_enable) ? vme_ccb_subaddr_strobe_os	: 0;
+	assign ccb_subaddr_strobe	= (vme_ccb_cmd_enable) ? vme_ccb_subaddr_strobe_os	: 1'b0;
 
 // Decode CCB TTC command, latch it, and one-clock-wide pulse it coincident with ccb_cmd_strobe
 	parameter MXDEC = 'h32;		// Highest CCB Command decode
@@ -475,15 +488,15 @@
 	wire ttc_bxreset				= ccb_cmd_dec['h32];	// Resets bxn, does not reset l1a count or buffers
 	wire ttc_orbit_reset			= 0;					// Reset orbit counter, not defined yet
 
-	assign ccb_sump = (|ccb_cmd_dec) | ccb_rx_ff[35:34];	// Unused signals
+	assign ccb_sump = (|ccb_cmd_dec) | (|ccb_rx_ff[35:34]);	// Unused signals
 
-// DMB Received data
-	reg [5:0]	dmb_rx_ff = 0; // synthesis attribute IOB of dmb_r
+// DMB Received data IOB
+	reg [5:0]	dmb_rx_ff = 0;  				// synthesis attribute IOB of dmb_rx_ff is "true";
 	wire 		tmb_l1a_release;
 	wire		dmb_ext_trig;
 
-	always @(posedge clock) begin
-	dmb_rx_ff[5:0]	<= dmb_rx[5:0];				// Copy for VME
+	always @(posedge clock) begin				// Copy for VME
+	dmb_rx_ff[5:0]	<= dmb_rx[5:0];	
 	end
 
 	assign tmb_l1a_release	= dmb_rx_ff[0];		// DMB Requested l1a release
@@ -526,12 +539,12 @@
 	initial l1a_sm = idle;
 
 	always @(posedge clock) begin
-	if (sm_reset) l1a_sm = idle;
+	if   (sm_reset)					l1a_sm <= idle;
 	else begin
 	case (l1a_sm)
-	idle:	if (int_l1a_request)	l1a_sm = count;
-	count:	if (l1a_done)			l1a_sm = idle;
-	default							l1a_sm = idle;
+	idle:	if (int_l1a_request)	l1a_sm <= count;
+	count:	if (l1a_done)			l1a_sm <= idle;
+	default							l1a_sm <= idle;
 	endcase
 	end
 	end
@@ -540,12 +553,12 @@
 	reg [7:0] l1a_delay_cnt = 0;
 
 	always @(posedge clock) begin
-	if		(l1a_sm == idle) l1a_delay_cnt = 0;						// sync clear
-	else if	(l1a_sm != idle) l1a_delay_cnt = l1a_delay_cnt + 1;		// sync count
+	if		(l1a_sm == idle) l1a_delay_cnt <= 0;					// sync clear
+	else if	(l1a_sm != idle) l1a_delay_cnt <= l1a_delay_cnt + 1'd1;	// sync count
 	end
 
 	assign l1a_done      = l1a_delay_cnt == l1a_delay_vme;
-	wire   int_l1a_pulse = l1a_done;
+	wire   int_l1a_pulse = l1a_done && (l1a_sm != idle);
 
 // Multiplex Level 1 Accepts from CCB, VME and Internal delay generator
 	reg ccb_l1accept = 0;
@@ -557,10 +570,10 @@
 	end
 
 // Internal bx0  emulator
-	reg [MXBXN-1:0]	bxn_emu = 0;							// LHC period, max BXN count+1
+	reg [MXBXN-1:0]	bxn_emu = 0;								// LHC period, max BXN count+1
 	reg             bx0_emu = 0;
 
-	wire bxn_emu_ovf  	= bxn_emu == lhc_cycle[11:0]-1;		// BXN maximum count for pretrig bxn counter
+	wire bxn_emu_ovf  	= bxn_emu == lhc_cycle[11:0]-1;			// BXN maximum count for pretrig bxn counter
 	wire bxn_emu_reset	= bxn_emu_ovf || !vme_bx0_emu_en;
 
 	always @(posedge clock) begin
@@ -591,41 +604,42 @@
 	initial fmm_sm = fmm_startup;
 	
 	always @(posedge clock) begin
-	if		(sm_reset  ) fmm_sm = fmm_startup;		// start-up reset
-	else if	(ttc_resync) fmm_sm = fmm_resync;		// re-sync  reset
+	if		(sm_reset  ) fmm_sm <= fmm_startup;		// start-up reset
+	else if	(ttc_resync) fmm_sm <= fmm_resync;		// re-sync  reset
 	else begin
 
 	case (fmm_sm)
 
-	fmm_startup:						// Startup wait
+	fmm_startup:									// Startup wait
 		if (startup_done)
-		 fmm_sm = fmm_stop;
+		 fmm_sm <= fmm_stop;
 
-	fmm_resync:							// Resync
-		if (ttc_bx0)					// Bx0 arrived 1bx after resync
-		 fmm_sm = fmm_run;		
+	fmm_resync:										// Resync
+		if (ttc_bx0)								// Bx0 arrived 1bx after resync
+		 fmm_sm <= fmm_run;		
 		else 
-		 fmm_sm = fmm_wait_bx0;
+		 fmm_sm <= fmm_wait_bx0;
 
-	fmm_stop:							// Stop triggers
+	fmm_stop:										// Stop triggers
 		if (ttc_start_trigger && !ignore)
-		 fmm_sm = fmm_wait_bx0;
+		 fmm_sm <= fmm_wait_bx0;
 
-	fmm_wait_bx0:						// Wait for bx0 after start_trigger
+	fmm_wait_bx0:									// Wait for bx0 after start_trigger
 		if (ttc_bx0)
-		 fmm_sm = fmm_run;
+		 fmm_sm <= fmm_run;
 		else if (ttc_stop_trigger && !ignore)
-		 fmm_sm = fmm_stop;
+		 fmm_sm <= fmm_stop;
 
-	fmm_run:							// Process triggers
+	fmm_run:										// Process triggers
 		if (ttc_stop_trigger && !ignore)
-		 fmm_sm = fmm_stop;
+		 fmm_sm <= fmm_stop;
 
 	default
-		 fmm_sm = fmm_stop;
+		 fmm_sm <= fmm_stop;
 	endcase
 	end
 	end
+
 
 // FMM Control signals
 	reg fmm_trig_stop = 1;									// Power up stop state
@@ -676,11 +690,11 @@
 //	CCB Transmitter Section:
 //---------------------------------------------------------------------------------------------------------------------
 // Map transmitted signal names, invert for GTLP, latch in IOB FFs
-	reg	[26:0] ccb_tx_ff = 0;
+	reg	[26:0] ccb_tx_ff = 0;	// synthesis attribute IOB of ccb_tx_ff is "true";
 
 	always @(posedge clock) begin
-	ccb_tx_ff[ 8: 0]	<=	~(clct_status[8:0] * clct_status_en_ff);	// Output GTL high if this board is not selected
-	ccb_tx_ff[17: 9]	<=	~(alct_status[8:0] * alct_status_en_ff);	// Output GTL high if this board is not selected
+	ccb_tx_ff[8:0]		<=	~(clct_status[8:0] & {9{clct_status_en_ff}});	// Output GTL high if this board is not selected
+	ccb_tx_ff[17:9]		<=	~(alct_status[8:0] & {9{alct_status_en_ff}});	// Output GTL high if this board is not selected
 	ccb_tx_ff[18]		<=	~tmb_cfg_done;
 	ccb_tx_ff[19]		<=	~alct_cfg_done;
 	ccb_tx_ff[20]		<=	~tmb_l1a_request;
@@ -688,8 +702,11 @@
 	ccb_tx_ff[26:22]	<=	~tmb_reserved_in[4:0];
 	end
 
-	assign _ccb_tx[17:0] = (ccb_status_oe_lcl) ? ccb_tx_ff[17:0] : 18'bzzzzzzzzzzzzzzzzzz;
-	assign _ccb_tx[26:18]= (!gtl_loop_lcl    ) ? ccb_tx_ff[26:18] : 9'bzzzzzzzzz;
+	`ifdef VIRTEX6 (*KEEP="true"*) `endif
+	wire [1:0] ccb_status_noe = ~{ccb_status_oe_lcl,ccb_status_oe_lcl};		//xsynthesis attribute KEEP of ccb_status_noe is "true"
+	
+	assign _ccb_tx[17:0] = (ccb_status_noe) ? {18{1'bz}} : ccb_tx_ff[17:0];	// ORs !ccb_status_oe_lcl to prevent packing err in ilogic for ise 12
+	assign _ccb_tx[26:18]= (gtl_loop_lcl  ) ? { 9{1'bz}} : ccb_tx_ff[26:18];
 
 //---------------------------------------------------------------------------------------------------------------------
 //	 Simulation state machine display
@@ -700,7 +717,7 @@
 
 	always @* begin
 	case (fmm_sm)
-	fmm_startup:	fmm_sm_disp <= "start  ";
+	fmm_startup:	fmm_sm_disp <= "startup";
 	fmm_resync:		fmm_sm_disp <= "resync ";
 	fmm_stop:		fmm_sm_disp <= "stop   ";
 	fmm_wait_bx0:	fmm_sm_disp <= "waitbx0";

@@ -1,7 +1,10 @@
+`include "firmware_version.v"
+
+`ifdef VIRTEX2
 `timescale 1ns / 1ps
 //------------------------------------------------------------------------------------------------------------------
-// Clock DCM quadrant multiplexer for digital phase shifters
-//
+// Virtex2: Clock DCM quadrant multiplexer for digital phase shifters
+//------------------------------------------------------------------------------------------------------------------
 //	08/04/09 Initial
 //	08/05/09 Replace timing constraints with location constraints in ucf
 //	08/06/09 Add local ffs to boost quadrant selects into 160mhz time domain
@@ -10,7 +13,9 @@
 //	08/10/09 Move local ffs out of this module, caused par to fail in full tmb, but test subdesign is ok
 //	08/12/09 Add fillers to occupy the unused slice in clb
 //	08/14/09 Add clock property to 4x
-//------------------------------------------------------------------------------------------------------------------
+//	11/08/10 Add bypass for virtex6, this module is not used
+//	11/30/10 Conform virtex2|6 selection
+//-----------------------------------------------------------------------------------------------------------------
 	module clock_mux
 	(
 	clk4x,
@@ -60,3 +65,24 @@
 //------------------------------------------------------------------------------------------------------------------
 	endmodule
 //------------------------------------------------------------------------------------------------------------------
+
+`elsif VIRTEX6
+`timescale 1ns / 1ps
+//------------------------------------------------------------------------------------------------------------------
+// Module skipped
+//------------------------------------------------------------------------------------------------------------------
+	module clock_mux (clock,clock_mux_sump);
+
+	initial	$display("clock_mux: Not instantiated for Virtex6");
+
+	input		clock;
+	output reg	clock_mux_sump=0;
+
+	always @(posedge clock) begin
+	clock_mux_sump <=! clock_mux_sump;
+	end
+
+//------------------------------------------------------------------------------------------------------------------
+	endmodule
+//------------------------------------------------------------------------------------------------------------------
+`endif

@@ -10,6 +10,8 @@
 //	01/23/08 Change debug name
 //	11/15/08 Add data array to queue storage
 //	04/24/09 Add reg init 0s
+//	09/13/10 Port to ise 12
+//	09/14/10 Add passed parameter display
 //--------------------------------------------------------------------------------------------------------------------
 	module fence_queue
 	(
@@ -38,6 +40,10 @@
 	parameter ADRB 	= 11;			// Address bits
 	parameter MXADR = 2048;			// RAM addresses
 	parameter WIDTH = ADRB+32;		// Data width, fence data is itself an address
+
+	initial	$display("fence_queue: ADRB =%d",ADRB );
+	initial	$display("fence_queue: MXADR=%d",MXADR);
+	initial	$display("fence_queue: WIDTH=%d",WIDTH);
 
 //--------------------------------------------------------------------------------------------------------------------
 // Ports
@@ -98,13 +104,13 @@
 // Pop RAM address counter
 	always @(posedge clock) begin
 	if		(reset ) rd_adr <= 0;
-	else if	(pop_en) rd_adr <= rd_adr+1;
+	else if	(pop_en) rd_adr <= rd_adr+1'b1;
 	end
 
 // Push RAM address counter
 	always @(posedge clock) begin
 	if		(reset  ) wr_adr <= 0;
-	else if	(push_en) wr_adr <= wr_adr+1;
+	else if	(push_en) wr_adr <= wr_adr+1'b1;
 	end
 
 // Fifo word counter
@@ -113,8 +119,8 @@
 	else begin
 	case ({push_en, pop_en})
 	 2'b00 : nwords <= nwords;		// Idle
-	 2'b01 : nwords <= nwords-1;	// Pop
-	 2'b10 : nwords <= nwords+1;	// Push
+	 2'b01 : nwords <= nwords-1'b1;	// Pop
+	 2'b10 : nwords <= nwords+1'b1;	// Push
 	 2'b11 : nwords <= nwords;		// Push & pop
 	endcase
 	end

@@ -10,6 +10,8 @@
 //	07/30/04 Remove reversed bits logic, it never gets used
 //	09/19/06 Mod for xst
 //	04/23/09 Mod for ise 10.1i
+//	07/26/10 Port to ise 12
+//	10/05/10 Check non-blocking operators
 //-------------------------------------------------------------------------------------------------------------------
 
 	module crc22a (clock,data,reset,crc);

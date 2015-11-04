@@ -18,6 +18,8 @@
 //	11/15/08 Add data array to queue storage
 //	05/26/10 Rename sump
 //	06/26/10 Add stalled_once signal
+//	09/15/10 Port to ise 12, replace blocking operators
+//	11/29/10 FF buffer setback arithemetic, gives 21% speed increase, elimintates map optimized-out blocks
 //-------------------------------------------------------------------------------------------------------------------
 	module buffer_write_ctrl
 	(
@@ -202,8 +204,8 @@
 
 // Delay buffer status signals 1bx to compensate for RAM access latency
 	reg [MXBADR-1+1:0] buf_fence_cnt=0;
-	reg	 buf_q_empty=1;
-	reg	 buf_q_full=0;
+	reg	 buf_q_empty = 1;
+	reg	 buf_q_full  = 0;
 
 	always @(posedge clock) begin	
 	buf_q_empty 	<= empty;
@@ -215,17 +217,23 @@
 	wire [RAM_ADRB-1:0] next_fence_adr;
 	wire [RAM_ADRB-1:0] pretrig_setback;
 	wire [RAM_ADRB-1:0] prestore_setback;
+	reg  [RAM_ADRB-1:0] buf_setback=0;
 
 	assign pretrig_setback  = (fifo_pretrig_cfeb >= fifo_pretrig_rpc) ? fifo_pretrig_cfeb : fifo_pretrig_rpc;
 	assign prestore_setback =  READ_ADR_OFFSET+1+PRESTORE_SAFETY;
 
-	assign next_fence_adr = buf_queue_adr-pretrig_setback-prestore_setback;	// compensate for pre-trig latency
+	always @(posedge clock) begin
+	buf_setback <= pretrig_setback-prestore_setback;
+	end
+
+	assign next_fence_adr = buf_queue_adr-buf_setback;	// compensate for pre-trig latency
 
 // Find distance to next fence, FF buffer for speed
-	reg [MXBADR-1:0] fence_dist=-1;
-	
+	reg  [MXBADR-1:0  ] fence_dist      = -1;
+	wire [RAM_ADRB-1:0] highest_ram_adr = RAM_DEPTH-1;
+
 	always @(posedge clock) begin
-	fence_dist <= buf_q_empty ? RAM_DEPTH-1 : (next_fence_adr-fifo_wadr);
+	fence_dist <= buf_q_empty ? highest_ram_adr : (next_fence_adr-fifo_wadr);
 	end
 
 // Minimum allowed distance to next fence is adr space needed for at least 1 more event
@@ -289,8 +297,8 @@
 	reg [RAM_ADRB-1:0] prestore_cnt=0;
 
 	always @(posedge clock) begin
-	if(buf_sm!=bsm_prestore)prestore_cnt=0;
-	else					prestore_cnt=prestore_cnt+1;
+	if (buf_sm!=bsm_prestore) prestore_cnt <= 0;
+	else					  prestore_cnt <= prestore_cnt+1'b1;
 	end
 
 	wire [MXBADR-1:0] prestore_bx = pretrig_setback + prestore_setback;
@@ -305,35 +313,35 @@
 	initial buf_sm = bsm_init;
 
 	always @(posedge clock) begin
-	if(reset)							// On over-riding resync or reset
-	buf_sm = bsm_init;					// Go erase all fence markers
+	if (reset)							// On over-riding resync or reset
+	buf_sm <= bsm_init;					// Go erase all fence markers
 	else
 	case (buf_sm)
 	bsm_init:							
-		if(power_up)					// Reset state reached when resync asserted after power up
-		if(!fifo_no_raw_hits)
-			buf_sm = bsm_prestore;		// Prestore raw hits
+		if (power_up)					// Reset state reached when resync asserted after power up
+		if (!fifo_no_raw_hits)
+			buf_sm <= bsm_prestore;		// Prestore raw hits
 			else
-			buf_sm = bsm_run;			// Unless they are not used
+			buf_sm <= bsm_run;			// Unless they are not used
 
 	bsm_prestore:
-		if(hit_fence)
-		buf_sm = bsm_hold;				// Hold if fence marker hit [should not be possible at this point]
-		else if(prestore_done)			// Wait for tbins before pre-trigger to write into raw hits RAM
-		buf_sm = bsm_run;
+		if (hit_fence)
+		buf_sm <= bsm_hold;				// Hold if fence marker hit [should not be possible at this point]
+		else if (prestore_done)			// Wait for tbins before pre-trigger to write into raw hits RAM
+		buf_sm <= bsm_run;
 
 	bsm_run:							// Run mode: enables wr_buf_ready to trigger section
-		if(hit_fence)
-		buf_sm = bsm_hold;				// Hold if fence marker hit
+		if (hit_fence)
+		buf_sm <= bsm_hold;				// Hold if fence marker hit
 
 	bsm_hold:
-		if(hold_done)					// Continue to hold until fence is erased
-		if(!fifo_no_raw_hits)
-			buf_sm = bsm_prestore;		// Prestore raw hits
+		if (hold_done)					// Continue to hold until fence is erased
+		if (!fifo_no_raw_hits)
+			buf_sm <= bsm_prestore;		// Prestore raw hits
 			else
-			buf_sm = bsm_run;			// Unless they are not used
+			buf_sm <= bsm_run;			// Unless they are not used
 	default
-		buf_sm = bsm_init;
+		buf_sm <= bsm_init;
 	endcase
 	end
 
@@ -344,8 +352,8 @@
 	assign fifo_wen = wadr_en;														// enable fifo ram write
 
 	always @(posedge clock) begin
-	if		(reset  ) fifo_wadr = 0;
-	else if	(wadr_en) fifo_wadr = fifo_wadr+1;
+	if		(reset  ) fifo_wadr <= 0;
+	else if	(wadr_en) fifo_wadr <= fifo_wadr+1'b1;
 	end
 
 	assign wr_buf_adr   = fifo_wadr;														// RAM write address for raw hits and header
