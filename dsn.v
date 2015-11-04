@@ -1,87 +1,56 @@
 `timescale 1ns / 1ps
-//`define DEBUG_DSN 1
 //--------------------------------------------------------------------------------------------------------------
 // DSN
 //
 // Digital Serial Number Reader
-//
-//	12/18/01 Initial
-//	12/19/01 Cycle time is now the same for write 1 and write 0, >120us
-//	03/12/02 Replaced library calls with behavioral code
-//	12/04/03 Added non-bidir I/Os for RAT
-//	12/11/03 Add global reset
-//	04/26/04 Rename gbl_reset
-//	09/22/06 Mod for xst
-//	09/29/06 Add ratmode disconnect for dsn_io
-//	04/27/09 Add safe implementation to state machine
-//	08/11/09 Modify to use 1x clock instead of 1/4x vme clock
-//	08/20/10 Port to ise 12, replace blocking with non-blocking operators, add debug display
-//	08/20/10 Rebuild bidir io with conditional generate
-//	08/26/10 Move reg for non debug version, add generate block names for ise 8
-//	08/26/10 Push inverter to input side of dsn_out ff, was getting map warnings
-//	09/10/10 Invert rat output
+// 12/18/01 Initial
+// 12/19/01 Cycle time is now the same for write 1 and write 0, >120us
+// 03/12/02 Replaced library calls with behavioral code
+// 12/04/03 Added non-bidir I/Os for RAT
+// 12/11/03 Add global reset
+// 04/26/04 Rename gbl_reset
+// 09/22/06 Mod for xst
+// 09/29/06 Add ratmode disconnect for dsn_io
+// 04/27/09 Add safe implementation to state machine
+// 08/11/09 Modify to use 1x clock instead of 1/4x vme clock
 //--------------------------------------------------------------------------------------------------------------
-	module dsn
-	(
-	clock,
-	global_reset,
-	start,
-	dsn_io,
-	dsn_in_rat,
-	dsn_out_rat,
-	wr_data,
-	wr_init,
-	busy,
-	rd_data,
-	dsn_sump
-`ifdef DEBUG_DSN
-	,dsn_sm_dsp
-	,count_done
-	,write_done
-	,latch_data
-	,end_count
-	,end_write
-	,count
-`endif
-	);
-//--------------------------------------------------------------------------------------------------------------
-// Generic
-//--------------------------------------------------------------------------------------------------------------
-	parameter RATMODE =	0;			// 0=for TMB and Mez, 1 for RAT
-	initial	$display("dsn: RATMODE=%d",RATMODE);
+	module dsn(clock,global_reset,start,dsn_io,dsn_in_rat,dsn_out_rat,wr_data,wr_init,busy,rd_data,dsn_sump);
 
-// Counter widths
-	parameter MXCNT		=	17;		// Main counter dimension
-	parameter MXEND		=	5;		// End counter width, log2(mxcnt)+1
-	parameter CNT_BUSY	=	16;		// Init  busy duration
-	parameter CNT_INIT	=	15;		// Init  pulse duration,          low for 900 uS
-	parameter CNT_SLOT	=	13;		// Slot duration				  low for >120us
-	parameter CNT_LONG	=	12;		// Long  pulse duration, logic 0, low for 102 uS
-	parameter CNT_SHORT	=	6;		// Short pulse duration, logic 1, low for 1.6 uS
-	parameter CNT_READ	=	8;		// Master Read delay              latch at 12 uS
+// Passed from caller
+	parameter RATMODE	=	0;			// 0=for TMB and Mez, 1 for RAT
+
+// Static
+	parameter MXCNT		=	17;			// Main counter dimension
+	parameter MXEND		=	5;			// End counter width, log2(mxcnt)+1
+	parameter CNT_BUSY	=	16;			// Init  busy duration
+	parameter CNT_INIT	=	15;			// Init  pulse duration,          low for 900 uS
+	parameter CNT_SLOT	=	13;			// Slot duration				  low for >120us
+	parameter CNT_LONG	=	12;			// Long  pulse duration, logic 0, low for 102 uS
+	parameter CNT_SHORT	=	6;			// Short pulse duration, logic 1, low for 1.6 uS
+	parameter CNT_READ	=	8;			// Master Read delay              latch at 12 uS
 
 // Ports
-	input 	clock;					// 40MHz clock
-	input	global_reset;			// Global reset
-	input	start;					// Begin counting
-	inout	dsn_io;					// DSN chip I/O pin
-	input	dsn_in_rat;				// Non-bidir input  for RAT
-	output	dsn_out_rat;			// Non-bidir output for RAT
-	input	wr_data;				// DSN data bit to output
-	input	wr_init;				// DSN init mode
-	output	busy;					// DSN chip is busy
-	output	rd_data;				// DSN data read from chip
-	output	dsn_sump;				// Unused signals
+	input 				clock;			// 40MHz clock
+	input				global_reset;	// Global reset
+	input				start;			// Begin counting
+	inout				dsn_io;			// DSN chip I/O pin
+	input				dsn_in_rat;		// Non-bidir input  for RAT
+	output				dsn_out_rat;	// Non-bidir output for RAT
+	input				wr_data;		// DSN data bit to output
+	input				wr_init;		// DSN init mode
+	output				busy;			// DSN chip is busy
+	output				rd_data;		// DSN data read from chip
+	output				dsn_sump;		// Unused signals
 
-// Debug
-	`ifdef DEBUG_DSN
-	output	count_done;
-	output	write_done;
-	output	latch_data;
-	output	[MXEND-1:0] end_count;
-	output	[MXEND-1:0] end_write;
-	output	[MXCNT-1:0] count;
-	`endif
+// Local
+	wire				count_done;
+	wire				write_done;
+	wire				latch_data;
+	wire				dsn_in;
+	reg					dsn_out;
+	reg					rd_data;
+	reg		[MXEND-1:0]	end_count;
+	reg		[MXEND-1:0]	end_write;
 
 // State Machine declarations
 	reg [5:0] dsn_sm;	// synthesis attribute safe_implementation of dsn_sm is "yes";
@@ -93,41 +62,12 @@
 	parameter hold		=	4;
 	parameter unstart	=	5;
 
-// Terminal count controls pulse width
-	reg [MXEND-1:0] end_count;
-	reg [MXEND-1:0] end_write;
-	reg	[MXCNT-1:0] count=0;
-	
-	always @* begin
-	if      (wr_init == 1) begin end_count <= CNT_BUSY; end_write <= CNT_INIT;  end
-	else if (wr_data == 0) begin end_count <= CNT_SLOT; end_write <= CNT_LONG;  end
-	else if (wr_data == 1) begin end_count <= CNT_SLOT; end_write <= CNT_SHORT; end
-	else                   begin end_count <= CNT_BUSY; end_write <= CNT_INIT;  end
-	end
+// Bidir DSN I/O pins
+	assign dsn_io = (dsn_out | RATMODE) ? ~dsn_out : 1'bz;	// Open drain
+	assign dsn_in = (RATMODE) ? dsn_in_rat : dsn_io;		// RAT is non-bidir
+	assign dsn_out_rat	= ~dsn_out;							// RAT is non-bidir
 
-	wire count_done = count[end_count];
-	wire write_done = count[end_write];
-	wire latch_data = count[CNT_READ];
-
-// Bidir I/O pins for TMB, unidir for RAT
-	reg  dsn_out=0;
-	wire dsn_in;
-
-	generate 
-	if (RATMODE==1) begin: genrat		// RAT is non-bidir							
-	assign dsn_io      =  0;
-	assign dsn_in      =  dsn_in_rat;	
-	assign dsn_out_rat = ~dsn_out;
-	assign dsn_sump    =  dsn_io;
-	end
-	else begin: gentmb					// Mez and TMB are bidir open drain
-	PULLUP dsn_io_pullup (dsn_io);
-	assign dsn_io      = (dsn_out) ? 1'b0 : 1'bz;
-	assign dsn_in      =  dsn_io;
-	assign dsn_out_rat =  0;
-	assign dsn_sump    =  dsn_in_rat;
-	end
-	endgenerate
+	assign dsn_sump = dsn_in_rat | dsn_io;					// Occupy unused inputs
 
 // Output Pulse-width-modulated FF
 	always @(posedge clock) begin
@@ -136,52 +76,71 @@
 	end
 
 // Main Counter
-	assign busy  = (dsn_sm != idle) && (dsn_sm != unstart);
+	reg	[MXCNT-1:0] count;
+
+	assign busy  = dsn_sm != idle & dsn_sm != unstart;
 
 	always @(posedge clock) begin
 	if		(dsn_sm==idle) count <= 0;
-	else if (busy        ) count <= count + 1'b1; 
+	else if (busy        ) count <= count + 1; 
 	end
 
-// Latch data bit from DSN chip after dsn_io deasserts. And-gate forces FF into CLB, IOB pair has clock conflict in virtex2
-	reg rd_data = 0;
+// Terminal count controls pulse width
+	always @(wr_data or wr_init) begin
+	if (wr_init == 1'b1) begin
+	 end_count=CNT_BUSY;
+	 end_write=CNT_INIT;
+	end
+	else if (wr_data == 1'b0) begin
+	 end_count=CNT_SLOT;
+	 end_write=CNT_LONG;
+	end
+	else if (wr_data == 1'b1) begin
+	 end_count=CNT_SLOT;
+	 end_write=CNT_SHORT;
+	end
+	end
 
+	assign count_done = count[end_count];
+	assign write_done = count[end_write];
+	assign latch_data = count[CNT_READ];
+
+// Latch data bit from DSN chip after dsn_io deasserts. And-gate forces FF into CLB, IOB pair has clock conflict in virtex2
 	always @(posedge clock) begin
 	if (dsn_sm==latch) rd_data <= dsn_in && (dsn_sm==latch);
 	end
 
 // DSN State Machine
 	always @(posedge clock) begin
-	if (global_reset)		 dsn_sm <= idle;
+	if(global_reset)
+	dsn_sm = idle;
 	else begin
-	case (dsn_sm )
-	idle:    if (start)		 dsn_sm <= pulse;
-	pulse:					 dsn_sm <= wait1;
-	wait1:   if (latch_data) dsn_sm <= latch;
-	latch:					 dsn_sm <= hold;
-	hold:    if (count_done) dsn_sm <= unstart;
-	unstart: if (!start)	 dsn_sm <= idle;
-	default:                 dsn_sm <= idle;
-	endcase
-	end
-	end
-
-// Debug
-   `ifdef DEBUG_DSN
-	output reg [39:0] dsn_sm_dsp;
-
-	always @* begin
 	case (dsn_sm)
-	idle:    dsn_sm_dsp <= "idle ";
-	pulse:   dsn_sm_dsp <= "pulse";
-	wait1:   dsn_sm_dsp <= "wait ";
-	latch:   dsn_sm_dsp <= "latch";
-	hold:    dsn_sm_dsp <= "hold ";
-	unstart: dsn_sm_dsp <= "unstr";
-	default: dsn_sm_dsp <= "wtf!!";	// undefined
+
+	idle:
+	 if (start)
+	 dsn_sm	=	pulse;
+
+	pulse:
+	 dsn_sm	=	wait1;
+
+	wait1:
+	 if (latch_data)
+	 dsn_sm	=	latch;
+
+	latch:
+	 dsn_sm =	hold;
+
+	hold:
+	 if (count_done)
+	 dsn_sm	=	unstart;
+
+	unstart:
+	 if (!start)
+	 dsn_sm	=	idle;
 	endcase
 	end
-   `endif
+	end
 
 //--------------------------------------------------------------------------------------------------------------
 	endmodule

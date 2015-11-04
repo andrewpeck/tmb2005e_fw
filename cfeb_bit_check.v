@@ -4,9 +4,8 @@
 //  Bad CFEB bit detection:
 //	CFEB bits continuously high between check pluses are flagged as bad
 //
-//	12/10/09 Initial
-//	01/13/10 Add 1bx high detection
-//	08/04/10 Port to ise 12
+// 12/10/09 Initial
+// 01/13/10 Add 1bx high detection
 //--------------------------------------------------------------------------------------------------------
 	module cfeb_bit_check
 	(

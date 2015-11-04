@@ -1,11 +1,14 @@
 //---------------------------------------------------------------------------------------------------------------------------------------
-//	TMB2010E Global Definitions: Turn off user file associations in Edit/Preferences/ISEGeneral
+//	TMB2005E Global Definitions: Turn off user file associations in Edit/Preferences/ISEGeneral
 //---------------------------------------------------------------------------------------------------------------------------------------
 // Firmware version global definitions
 	`define FIRMWARE_TYPE		04'hC		// C=Normal CLCT/TMB, D=Debug PCB loopback version
 	`define VERSION				04'hE		// Version revision number, A=TMB2004 and earlier, E=TMB2005E production
-	`define MONTHDAY			16'h1217	// Version date
-	`define YEAR				16'h2010	// Version date
+	`define MONTHDAY			16'h0626	// Version date
+	`define YEAR				16'h2011	// Version date
+	`define FPGAID				16'h4000	// FPGA Type XC2Vnnnn
+	`define ISE_VERSION			16'h0823	// ISE Compiler version 8.2i sp3 or 10.1i sp3
+	`define MEZCARD				04'hC		// Mezzanine Card: A=V23K, B=V24K prototype, C=V24K production
 
 	`define AUTO_VME			01'h1		// Automatically initialize VME registers from PROM data,   0=do not
 	`define AUTO_JTAG			01'h1		// Automatically initialize JTAG chain from PROM data,      0=do not
@@ -13,28 +16,13 @@
 	`define ALCT_MUONIC			01'h1		// Floats ALCT board  in clock-space with independent time-of-flight delay
 	`define CFEB_MUONIC			01'h1		// Floats CFEB boards in clock-space with independent time-of-flight delay
 	`define CCB_BX0_EMULATOR	01'h0		// Turns on bx0 emulator at power up, must be 0 for all CERN versions
-
-//---------------------------------------------------------------------------------------------------------------------------------------
-// Conditional compile flags: Enable only one FPGA_TYPE
-//---------------------------------------------------------------------------------------------------------------------------------------
-	`define VIRTEX2				04'h2		// FPGA type is Virtex2
-	`define MEZCARD				04'hC		// Mezzanine Card: A=V23K, B=V24K prototype, C=V24K production
-	`define ISE_VERSION			16'h0823	// ISE Compiler version 8.2i sp3 or 10.1i sp3
-	`define FPGAID				16'h4000	// FPGA Type 4000 XC2V4000
-
-//	`define VIRTEX6				04'h6		// FPGA type is Virtex6
-//	`define MEZCARD				04'hD		// Mezzanine Card: D=Virtex6
-//	`define ISE_VERSION			16'h1230	// ISE Compiler version 12.3 sp0
-//	`define FPGAID				16'h6195	// FPGA Type 6195 XC6VLX195T
-
 //---------------------------------------------------------------------------------------------------------------------------------------
 // Conditional compile flags: Enable only one CSC_TYPE
 //---------------------------------------------------------------------------------------------------------------------------------------
-	`define CSC_TYPE_A			04'hA		// Normal   CSC:  Normal chambers facing toward IR
+//	`define CSC_TYPE_A			04'hA		// Normal   CSC:  Normal chambers facing toward IR
 //	`define CSC_TYPE_B			04'hB		// Reversed CSC:  Normal chambers facing away from IR. All  hs = reversed
 //	`define CSC_TYPE_C			04'hC		// Normal   ME1B: ME1B   chambers facing toward IR.    ME1B hs =!reversed, ME1A hs = reversed
-//	`define CSC_TYPE_D			04'hD		// Reversed ME1B: ME1B   chambers facing away from IR. ME1B hs = reversed, ME1A hs =!reversed
-
+	`define CSC_TYPE_D			04'hD		// Reversed ME1B: ME1B   chambers facing away from IR. ME1B hs = reversed, ME1A hs =!reversed
 //---------------------------------------------------------------------------------------------------------------------------------------
 // Revision log
 //---------------------------------------------------------------------------------------------------------------------------------------
@@ -226,18 +214,7 @@
 //	07/01/10 Add counter for events lost from readout due to L1A window prioritizing
 //	07/04/10 Set default l1a_win_pri_en=1
 //	07/07/10 Move cfeb injector msbs to l1a lookback register, revert to discrete ren, wen
-//	07/23/10 Replace DDR sub-modules with port-compatible to virtex 6 versions
-//  08/16/10 Replace pattern finder with virtex 6 conditional compile, add virtex6 define in this file
-//	11/09/10 New virtex 6 sections
-//	11/12/10 Mod ccb.v to bypass ise 12 ilogic pack issue
-//	11/29/10 Buffer_write_ctrl mods to precalculate fence address, dtack and ready mirror FFs in vme
-//	11/30/10 First full assemlby of updated virtex2|6 modules
-//	12/01/10 Bugfix in clock_ctrl moved register inits out of generate loop
-//	12/02/10 Remove bufg locs in virtex2 clock_ctrl, replace ncfebs adders with luts in sequencer
-//	12/09/10 Move bufg and dcm LOCs to ucf, xst fails to attach attributes to generated instances :(
-//	12/16/10 Move dsn_io pullups to ucf, hdl pullup caused incorrect iob count
-//	12/16/10 Separate tmb and rat dsn modules
-//	12/17/10 Remove dsn_io pullups from ucf, they're only needed for simulation
+//	06/26/11 Mod vme to tri-state during write cycles
 //---------------------------------------------------------------------------------------------------------------------------------------
-//	End TMB2010E Global Definitions
+//	End TMB2005E Global Definitions
 //---------------------------------------------------------------------------------------------------------------------------------------

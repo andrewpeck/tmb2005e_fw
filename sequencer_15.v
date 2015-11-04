@@ -294,7 +294,6 @@
 //	06/09/10 Add l1a window priorities and one event per l1a mode, bugfix multiple l1as in window
 //	06/25/10 New miniscope channels delay pretrig bits and now include L1A signals
 //	06/26/10 Reduce miniscope channels to 14 because unpacker is weak
-//	07/01/10 Add counter for events lost from readout due to L1A window prioritizing
 //------------------------------------------------------------------------------------------------------------------
 //	Readout Format:
 //------------------------------------------------------------------------------------------------------------------
@@ -831,7 +830,6 @@
 	event_counter60,
 	event_counter61,
 	event_counter62,
-	event_counter63,
 
 // Event Counter Ports
 	hdr_clear_on_resync,
@@ -1488,7 +1486,6 @@
 	output	[MXCNTVME-1:0]	event_counter60;
 	output	[MXCNTVME-1:0]	event_counter61;
 	output	[MXCNTVME-1:0]	event_counter62;
-	output	[MXCNTVME-1:0]	event_counter63;
 
 // Event Counter Ports
 	input					hdr_clear_on_resync;	// Clear header counters on ttc_resync
@@ -2363,15 +2360,14 @@
 	wire l1a_match_cnt_en = l1a_match;	// TMB triggered, TMB in L1A window
 	wire l1a_notmb_cnt_en = l1a_notmb;	// L1A received, no TMB in window
 	wire tmb_nol1a_cnt_en = tmb_nol1a;	// TMB triggered, no L1A received
-	wire l1a_los_win;					// TMB readouts lost due to L1A prioritizing
 
 //------------------------------------------------------------------------------------------------------------------
 // Trigger/Readout VME Counter Section
 //------------------------------------------------------------------------------------------------------------------
 // Counter registers
 	parameter MNCNT			= 13;						// First sequencer counter, not number of counters beco they start at 7
-	parameter MXCNT			= 63;						// Last  sequencer counter, not number of counters beco they end   at 51
-	parameter RESYNCCNT_ID	= 61;						// TTC Resyncs received counter does not get cleared
+	parameter MXCNT			= 62;						// Last  sequencer counter, not number of counters beco they end   at 51
+	parameter RESYNCCNT_ID	= 60;						// TTC Resyncs received counter does not get cleared
 
 	reg	[MXCNTVME-1:0]	cnt [MXCNT:MNCNT];				// TMB counter array, counters[6:0] are in alct.v
 	reg [MXCNT:MNCNT]	cnt_en = 0;						// Counter increment enables
@@ -2434,13 +2430,12 @@
 	cnt_en[55]	<= l1a_notmb_cnt_en;					// L1A  L1A received,  no TMB in window
 	cnt_en[56]	<= tmb_nol1a_cnt_en;					// L1A  TMB triggered, no L1A in window
 	cnt_en[57]	<= (read_sm == xcrc0);					// L1A  TMB readouts completed
-	cnt_en[58]	<= l1a_los_win;							// L1A  TMB readouts lost due to L1A prioritizing
 	
-	cnt_en[59]	<= (|triad_skip[4:0]);					// STAT	CLCT Triads skipped
-	cnt_en[60]	<= buf_reset && startup_done;			// STAT	Raw hits buffer had to be reset due to ovf, error
-	cnt_en[61]	<= ttc_resync;							// STAT	TTC Resyncs received
-	cnt_en[62]	<= sync_err_cnt_en;						// STAT	TTC sync errors
-	cnt_en[63]	<= perr_pulse;							// STAT Raw hits RAM parity errors
+	cnt_en[58]	<= (|triad_skip[4:0]);					// STAT	CLCT Triads skipped
+	cnt_en[59]	<= buf_reset && startup_done;			// STAT	Raw hits buffer had to be reset due to ovf, error
+	cnt_en[60]	<= ttc_resync;							// STAT	TTC Resyncs received
+	cnt_en[61]	<= sync_err_cnt_en;						// STAT	TTC sync errors
+	cnt_en[62]	<= perr_pulse;							// STAT Raw hits RAM parity errors
 	end
 
 // Counter overflow disable
@@ -2532,7 +2527,6 @@
 	assign event_counter60	= cnt[60];
 	assign event_counter61	= cnt[61];
 	assign event_counter62	= cnt[62];
-	assign event_counter63	= cnt[63];
 
 //------------------------------------------------------------------------------------------------------------------
 // Multi-buffer storage for event header
@@ -2937,7 +2931,6 @@
 	reg [3:0]	l1a_win_sr	[15:0];		// L1A Window position at LCT*L1A coincidence, init=1 removes spurious warnings
 	reg [11:0]	l1a_cnt_sr	[15:0];		// L1As received counter at LCT*L1A coincidence
 	reg [11:0]	l1a_bxn_sr	[15:0];		// BXN counter at LCT*L1A coincidence
-	reg	[15:0]	l1a_see_sr=0;			// L1A seen by this event
 
 // Generate table of enabled L1A windows and their priorities
 	wire [15:0] win_ena;				// Table of enabled window positions
@@ -3014,17 +3007,6 @@
 	nl1a_win_pri_en <= !l1a_win_pri_en;
 	end
 
-// L1A window lost events due to prioritizing
-	always @(posedge clock) begin
-	if (ttc_resync) l1a_see_sr <= 0;
-	i=0;
-	while (i<=14) begin
-	if (l1a_match && l1a_vpf_sr[i] && l1a_sr_include[i] && !l1a_tag_sr[i]) l1a_see_sr[i+1] <= 1;
-	else                                                                   l1a_see_sr[i+1] <= l1a_see_sr[i];
-	i=i+1;
-	end	// close while
-	end	// close clock
-
 // L1A window matching shift registers
 	always @(posedge clock) begin
 	if (ttc_resync) begin				// Sych reset
@@ -3060,17 +3042,15 @@
 	assign l1a_match_win = l1a_win_sr[winclosed];
 	assign l1a_cnt_win	 = l1a_cnt_sr[winclosed];
 	assign l1a_bxn_win	 = l1a_bxn_sr[winclosed];
-	assign l1a_see_win   = l1a_see_sr[winclosed];
 
 // L1A window width is generated by a pulse propagating down the enabled l1a_vpf_sr stages	
 	assign l1a_window_open    = |(l1a_vpf_sr & l1a_sr_include);
 	assign l1a_window_haslcts = |(l1a_vpf_sr & l1a_sr_include & ~l1a_tag_sr);
 
 // L1A Match results
-	assign l1a_match   = l1a_pulse   &&  l1a_window_haslcts;	// TMB trig_pulse matches L1A window, sent before window close
-	assign l1a_notmb   = l1a_pulse   && !l1a_window_haslcts;	// L1A arrived, but there was no TMB window open
-	assign tmb_nol1a   = tmb_push_sr && !l1a_push_me;			// No L1A arrived in window, sent after window close
-	assign l1a_los_win = l1a_see_win && !l1a_push_me;			// Event saw an L1A but was not pushed beco
+	assign l1a_match = l1a_pulse   &&  l1a_window_haslcts;	// TMB trig_pulse matches L1A window, sent before window close
+	assign l1a_notmb = l1a_pulse   && !l1a_window_haslcts;	// L1A arrived, but there was no TMB window open
+	assign tmb_nol1a = tmb_push_sr && !l1a_push_me;			// No L1A arrived in window, sent after window close
 
 // Diagnostic L1A cases force a readout without L1A matching, if enabled. Usually not enabled
 	wire l1a_forced_notmb =(l1a_notmb && l1a_allow_notmb && !no_daq);	// L1A with no TMB in window, readout anyway

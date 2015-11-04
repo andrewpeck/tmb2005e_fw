@@ -64,8 +64,6 @@
 //	05/11/09 Add miniscope 1st word option
 //	03/06/10 Add cfeb blockedbits readout
 //	03/07/10 Tune timing for blocked bits readout to sequencer
-//	12/01/10 Port to ise 12
-//	12/01/10 Remove prefixes from blocked bits slices
 //------------------------------------------------------------------------------------------------------------------
 	module	buffer_read_ctrl
 	(
@@ -240,9 +238,9 @@
 	parameter MXDS					= 8;			// Number of DiStrips per layer
 	parameter MXRPC					= 2;			// Number RPCs
 	parameter MXRPCB				= 1;			// Number RPC ID bits
-	parameter READ_ADR_OFFSET		= 11'd6;		// Number clocks from first address to pretrigger adr latch, trial 04/22/08
-	parameter READ_ADR_OFFSET_RPC	= 11'd0;		// Number clocks from first address to pretrigger
-	parameter READ_ADR_OFFSET_MINI	= 11'd0;		// Number clocks from first address to pretrigger
+	parameter READ_ADR_OFFSET		= 6;			// Number clocks from first address to pretrigger adr latch, trial 04/22/08
+	parameter READ_ADR_OFFSET_RPC	= 0;			// Number clocks from first address to pretrigger
+	parameter READ_ADR_OFFSET_MINI	= 0;			// Number clocks from first address to pretrigger
 
 // Raw hits RAM parameters
 	parameter RAM_DEPTH				= 2048;			// Storage bx depth
@@ -453,7 +451,7 @@
 
 	always @(posedge clock) begin
 	if		(cfeb_cnt_clr  ) cfeb_cnt =0;
-	else if (cfeb_tbin_done) cfeb_cnt=cfeb_cnt+1'b1;
+	else if (cfeb_tbin_done) cfeb_cnt=cfeb_cnt+1;
 	end
 
 	assign cfeb_done = ((cfeb_cnt == (rd_ncfebs-1)) || (rd_ncfebs == 0)) && cfeb_tbin_done;
@@ -466,10 +464,10 @@
 
 	always @(posedge clock) begin
 	if		(cfeb_tbin_cnt_clr) cfeb_tbin_cnt = 0;
-	else if	(cfeb_layer_done  ) cfeb_tbin_cnt = cfeb_tbin_cnt+1'b1;
+	else if	(cfeb_layer_done  ) cfeb_tbin_cnt = cfeb_tbin_cnt+1;
 	end
 
-	assign cfeb_tbin_last = fifo_tbins_cfeb - 1'b1;	// Calculate separately from tbin_done else fails for 0
+	assign cfeb_tbin_last = fifo_tbins_cfeb - 1;	// Calculate separately from tbin_done else fails for 0
 	assign cfeb_tbin_done = (cfeb_tbin_cnt == cfeb_tbin_last) && cfeb_layer_done;
 
 // Layer data read-address counter
@@ -479,7 +477,7 @@
 
 	always @(posedge clock) begin
 	if (cfeb_layer_cnt_clr)	cfeb_layer_cnt = 0;
-	else					cfeb_layer_cnt = cfeb_layer_cnt+1'b1;
+	else					cfeb_layer_cnt = cfeb_layer_cnt+1;
 	end
 
 	assign cfeb_layer_done = (cfeb_layer_cnt == 5);
@@ -495,7 +493,7 @@
 	while (i<=MXCFEB-1) begin
 	cfebptr[i]=0;
 	if (rd_list_cfeb[i]) begin
-	 cfebptr[n]=i[2:0];
+	 cfebptr[n]=i;
 	 n=n+1;
 	 end
 	 i=i+1;
@@ -612,7 +610,7 @@
 
 	always @(posedge clock) begin
 	if		(cfeb_cnt_bcb_clr) cfeb_cnt_bcb <= 0;
-	else if (bcb_slice_done  ) cfeb_cnt_bcb <= cfeb_cnt_bcb+1'b1;
+	else if (bcb_slice_done  ) cfeb_cnt_bcb <= cfeb_cnt_bcb+1;
 	end
 
 	assign bcb_done = ((cfeb_cnt_bcb == (rd_ncfebs_bcb-1)) || (rd_ncfebs_bcb == 0)) && bcb_slice_done;
@@ -625,7 +623,7 @@
 
 	always @(posedge clock) begin
 	if (cfeb_slice_cnt_bcb_clr) cfeb_slice_cnt_bcb = 0;
-	else                        cfeb_slice_cnt_bcb = cfeb_slice_cnt_bcb+1'b1;
+	else                        cfeb_slice_cnt_bcb = cfeb_slice_cnt_bcb+1;
 	end
 
 	assign cfeb_slice_last_bcb = 4-1;
@@ -644,7 +642,7 @@
 	while (ip<=MXCFEB-1) begin
 	cfebptr_bcb[ip]=0;
 	if (rd_list_bcb[ip]) begin
-	 cfebptr_bcb[np]=ip[2:0];
+	 cfebptr_bcb[np]=ip;
 	 np=np+1;
 	 end
 	 ip=ip+1;
@@ -674,12 +672,12 @@
 	end
 
 // Divide blocked bits into 4 banks for sequential readout
-	wire [11:0] cfeb_blockedbits_slice [3:0];
+	wire [15:0] cfeb_blockedbits_slice[3:0];
 
-	assign cfeb_blockedbits_slice[0] = cfeb_blockedbits[11: 0];
-	assign cfeb_blockedbits_slice[1] = cfeb_blockedbits[23:12];
-	assign cfeb_blockedbits_slice[2] = cfeb_blockedbits[35:24];
-	assign cfeb_blockedbits_slice[3] = cfeb_blockedbits[47:36];
+	assign cfeb_blockedbits_slice[0] = {3'h0, cfeb_blockedbits[11: 0]};
+	assign cfeb_blockedbits_slice[1] = {3'h1, cfeb_blockedbits[23:12]};
+	assign cfeb_blockedbits_slice[2] = {3'h2, cfeb_blockedbits[35:24]};
+	assign cfeb_blockedbits_slice[3] = {3'h3, cfeb_blockedbits[47:36]};
 
 // Point to slice within 1 CFEB array
 	reg [11:0]	      bcb_blkbits  = 0;
@@ -747,7 +745,7 @@
 
 	always @(posedge clock) begin
 	if		(rpc_cnt_clr  ) rpc_cnt = 0;
-	else if (rpc_tbin_done) rpc_cnt = rpc_cnt+1'b1;
+	else if (rpc_tbin_done) rpc_cnt = rpc_cnt+1;
 	end
 
 	assign rpc_done = ((rpc_cnt == (rd_nrpcs-1)) || (rd_nrpcs == 0)) && rpc_tbin_done;
@@ -760,10 +758,10 @@
 
 	always @(posedge clock) begin
 	if		(rpc_tbin_cnt_clr) rpc_tbin_cnt = 0;
-	else if	(rpc_slice_done  ) rpc_tbin_cnt = rpc_tbin_cnt+1'b1;
+	else if	(rpc_slice_done  ) rpc_tbin_cnt = rpc_tbin_cnt+1;
 	end
 
-	assign rpc_tbin_last = fifo_tbins_rpc - 1'b1;	// Calculate separately from tbin_done else fails for 0
+	assign rpc_tbin_last = fifo_tbins_rpc - 1;	// Calculate separately from tbin_done else fails for 0
 	assign rpc_tbin_done = (rpc_tbin_cnt == rpc_tbin_last) && rpc_slice_done;
 
 // Slice data read-address counter
@@ -773,7 +771,7 @@
 
 	always @(posedge clock) begin
 	if (rpc_slice_cnt_clr)	rpc_slice_cnt = 0;
-	else					rpc_slice_cnt = rpc_slice_cnt+1'b1;
+	else					rpc_slice_cnt = rpc_slice_cnt+1;
 	end
 
 	assign rpc_slice_done = (rpc_slice_cnt == 1);
@@ -787,7 +785,7 @@
 	while (i<=MXRPC-1) begin
 	rpcptr[i]=0;
 	if (rd_list_rpc[i]) begin
-	 rpcptr[n]=i[0];
+	 rpcptr[n]=i;
 	 n=n+1;
 	 end
 	 i=i+1;
@@ -914,10 +912,10 @@
 
 	always @(posedge clock) begin
 	if (mini_tbin_cnt_clr)	mini_tbin_cnt = 0;
-	else 					mini_tbin_cnt = mini_tbin_cnt+1'b1;
+	else 					mini_tbin_cnt = mini_tbin_cnt+1;
 	end
 
-	assign mini_tbin_last = fifo_tbins_mini - 1'b1;	// Calculate separately from tbin_done else fails for 0
+	assign mini_tbin_last = fifo_tbins_mini - 1;	// Calculate separately from tbin_done else fails for 0
 	assign mini_tbin_done = (mini_tbin_cnt == mini_tbin_last);
 	assign mini_done      = mini_tbin_done;			// miniscope has no ram mux
 

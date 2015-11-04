@@ -289,7 +289,6 @@
 //	05/10/10 Change vme instantiation to use defparams for firmware version constants
 //	06/26/10 Add miniscope write address offset
 //	06/30/10 Mod injector RAM for alct and l1a bits
-//	11/30/10 Add virtex6 unified module names
 //-------------------------------------------------------------------------------------------------------------------
 //	Port Declarations
 //-------------------------------------------------------------------------------------------------------------------
@@ -602,7 +601,7 @@
 // Display definitions in synth log
 //-------------------------------------------------------------------------------------------------------------------
 // Load global defines
-	`include "firmware_version.v"
+	`include "tmb2005e_firmware_version.v"
 
 // Display
 	`ifdef FIRMWARE_TYPE		initial	$display ("FIRMWARE_TYPE %H", `FIRMWARE_TYPE);	`endif
@@ -612,17 +611,11 @@
 	`ifdef FPGAID 				initial	$display ("FPGAID        %H", `FPGAID       );	`endif
 	`ifdef ISE_VERSION			initial	$display ("ISE_VERSION   %H", `ISE_VERSION  );	`endif
 	`ifdef MEZCARD				initial	$display ("MEZCARD       %H", `MEZCARD      );	`endif
-
 	`ifdef AUTO_VME 			initial	$display ("AUTO_VME      %H", `AUTO_VME     );	`endif
 	`ifdef AUTO_JTAG			initial	$display ("AUTO_JTAG     %H", `AUTO_JTAG    );	`endif
 	`ifdef AUTO_PHASER			initial	$display ("AUTO_PHASER   %H", `AUTO_PHASER  );	`endif
-
 	`ifdef ALCT_MUONIC			initial	$display ("ALCT_MUONIC   %H", `ALCT_MUONIC  );	`endif
 	`ifdef CFEB_MUONIC			initial	$display ("CFEB_MUONIC   %H", `CFEB_MUONIC  );	`endif
-
-	`ifdef VIRTEX2				initial $display ("VIRTEX2       %H", `VIRTEX2      );	`endif
-	`ifdef VIRTEX6				initial $display ("VIRTEX6       %H", `VIRTEX6      );	`endif
-
 	`ifdef CSC_TYPE_A			initial	$display ("CSC_TYPE_A    %H", `CSC_TYPE_A   );	`endif			
 	`ifdef CSC_TYPE_B			initial	$display ("CSC_TYPE_B    %H", `CSC_TYPE_B   );	`endif			
 	`ifdef CSC_TYPE_C			initial	$display ("CSC_TYPE_C    %H", `CSC_TYPE_C   );	`endif			
@@ -631,31 +624,27 @@
 //-------------------------------------------------------------------------------------------------------------------
 // Clock DCM Instantiation
 //-------------------------------------------------------------------------------------------------------------------
-// Phaser VME control/status ports
-	wire [6:0]	dps_fire;
-	wire [6:0]	dps_reset;
-	wire [6:0]	dps_busy;
-	wire [6:0]	dps_lock;
+	wire [5:0] phase_alct_rxd;
+	wire [5:0] phase_alct_txd;
+	wire [5:0] phase_cfeb0_rxd;
+	wire [5:0] phase_cfeb1_rxd;
+	wire [5:0] phase_cfeb2_rxd;
+	wire [5:0] phase_cfeb3_rxd;
+	wire [5:0] phase_cfeb4_rxd;
 
-	wire [7:0]	dps0_phase;
-	wire [7:0]	dps1_phase;
-	wire [7:0]	dps2_phase;
-	wire [7:0]	dps3_phase;
-	wire [7:0]	dps4_phase;
-	wire [7:0]	dps5_phase;
-	wire [7:0]	dps6_phase;
-
-	wire [2:0]	dps0_sm_vec;
-	wire [2:0]	dps1_sm_vec;
-	wire [2:0]	dps2_sm_vec;
-	wire [2:0]	dps3_sm_vec;
-	wire [2:0]	dps4_sm_vec;
-	wire [2:0]	dps5_sm_vec;
-	wire[2:0]	dps6_sm_vec;
+	wire [2:0] phaser_sm_alct_rxd;
+	wire [2:0] phaser_sm_alct_txd;
+	wire [2:0] phaser_sm_cfeb0_rxd;
+	wire [2:0] phaser_sm_cfeb1_rxd;
+	wire [2:0] phaser_sm_cfeb2_rxd;
+	wire [2:0] phaser_sm_cfeb3_rxd;
+	wire [2:0] phaser_sm_cfeb4_rxd;
 
 	wire [MXCFEB-1:0] clock_cfeb_rxd;
 
-	clock_ctrl uclock_ctrl
+	//xsynthesis attribute PERIOD of clock is "20ns";
+
+	clock_virtex2 uclock_virtex2
 	(
 // Clock inputs
 	.tmb_clock0				(tmb_clock0),				// In	40MHz clock bypasses 3D3444 and loads Mez PROMs, chip bottom
@@ -673,7 +662,7 @@
 	.clock_vme				(clock_vme),				// Out	10MHz global VME clock
 	.clock_lac				(clock_lac),				// Out	40MHz pattern finder multiplexer a/b select
 
-// Phase delayed clocks
+/// Phase delayed clocks
 	.clock_alct_txd			(clock_alct_txd),			// Out	40MHz ALCT transmit data clock 1x
 	.clock_alct_rxd			(clock_alct_rxd),			// Out	40MHz ALCT receive  data clock 1x
 	.clock_cfeb0_rxd		(clock_cfeb_rxd[0]),		// Out	40MHz CFEB receive  data clock 1x
@@ -696,29 +685,76 @@
 	.lock_rpc_rxalt1		(lock_rpc_rxalt1),			// Out	DCM lock status
 	.lock_tmb_clock1		(lock_tmb_clock1),			// Out	DCM lock status
 	.lock_alct_rxclock		(lock_alct_rxclock),		// Out	DCM lock status
-	.clock_ctrl_sump		(clock_ctrl_sump),			// Out	Unused signals
 
-// Phaser VME control/status ports
-	.dps_fire				(dps_fire[6:0]),			// In	Set new phase
-	.dps_reset				(dps_reset[6:0]),			// In	VME Reset current phase
-	.dps_busy				(dps_busy[6:0]),			// Out	Phase shifter busy
-	.dps_lock				(dps_lock[6:0]),			// Out	PLL lock status
+// ALCT_rxd Phaser VME control/status ports
+	.fire_alct_rxd			(fire_alct_rxd),			// In	Set new phase
+	.reset_alct_rxd			(reset_alct_rxd),			// In	VME Reset current phase
+	.hcycle_alct_rxd		(hcycle_alct_rxd),			// In	Half    cycle phase shift
+	.qcycle_alct_rxd		(qcycle_alct_rxd),			// In	Quarter cycle phase shift
+	.phase_alct_rxd			(phase_alct_rxd[5:0]),		// In	Phase to set, 0-255
+	.phaser_busy_alct_rxd	(phaser_busy_alct_rxd),		// Out	Phase shifter busy
+	.phaser_sm_alct_rxd		(phaser_sm_alct_rxd[2:0]),	// Out	Phase shifter machine state
+	.lock_alct_rxd			(lock_alct_rxd),			// Out	DCM lock status
 
-	.dps0_phase				(dps0_phase[7:0]),			// In	Phase to set, 0-255
-	.dps1_phase				(dps1_phase[7:0]),			// In	Phase to set, 0-255
-	.dps2_phase				(dps2_phase[7:0]),			// In	Phase to set, 0-255
-	.dps3_phase				(dps3_phase[7:0]),			// In	Phase to set, 0-255
-	.dps4_phase				(dps4_phase[7:0]),			// In	Phase to set, 0-255
-	.dps5_phase				(dps5_phase[7:0]),			// In	Phase to set, 0-255
-	.dps6_phase				(dps6_phase[7:0]),			// In	Phase to set, 0-255
+// ALCT_txd Phaser VME control/status ports
+	.fire_alct_txd			(fire_alct_txd),			// In	Set new phase
+	.reset_alct_txd			(reset_alct_txd),			// In	VME Reset current phase
+	.hcycle_alct_txd		(hcycle_alct_txd),			// In	Half    cycle phase shift
+	.qcycle_alct_txd		(qcycle_alct_txd),			// In	Quarter cycle phase shift
+	.phase_alct_txd			(phase_alct_txd[5:0]),		// In	Phase to set, 0-255
+	.phaser_busy_alct_txd	(phaser_busy_alct_txd),		// Out	Phase shifter busy
+	.phaser_sm_alct_txd		(phaser_sm_alct_txd[2:0]),	// Out	Phase shifter machine state
+	.lock_alct_txd			(lock_alct_txd),			// Out	DCM lock status
+	
+// CFEB0_rxd Phaser VME control/status ports
+	.fire_cfeb0_rxd			(fire_cfeb0_rxd),			// In	Set new phase
+	.reset_cfeb0_rxd		(reset_cfeb0_rxd),			// In	VME Reset current phase
+	.hcycle_cfeb0_rxd		(hcycle_cfeb0_rxd),			// In	Half    cycle phase shift
+	.qcycle_cfeb0_rxd		(qcycle_cfeb0_rxd),			// In	Quarter cycle phase shift
+	.phase_cfeb0_rxd		(phase_cfeb0_rxd[5:0]),		// In	Phase to set, 0-255
+	.phaser_busy_cfeb0_rxd	(phaser_busy_cfeb0_rxd),	// Out	Phase shifter busy
+	.phaser_sm_cfeb0_rxd	(phaser_sm_cfeb0_rxd[2:0]),	// Out	Phase shifter machine state
+	.lock_cfeb0_rxd			(lock_cfeb0_rxd),			// Out	DCM lock status
 
-	.dps0_sm_vec			(dps0_sm_vec[2:0]),			// Out	Phase shifter machine state
-	.dps1_sm_vec			(dps1_sm_vec[2:0]),			// Out	Phase shifter machine state
-	.dps2_sm_vec			(dps2_sm_vec[2:0]),			// Out	Phase shifter machine state
-	.dps3_sm_vec			(dps3_sm_vec[2:0]),			// Out	Phase shifter machine state
-	.dps4_sm_vec			(dps4_sm_vec[2:0]),			// Out	Phase shifter machine state
-	.dps5_sm_vec			(dps5_sm_vec[2:0]),			// Out	Phase shifter machine state
-	.dps6_sm_vec			(dps6_sm_vec[2:0])			// Out	Phase shifter machine state
+// CFEB1_rxd Phaser VME control/status ports
+	.fire_cfeb1_rxd			(fire_cfeb1_rxd),			// In	Set new phase
+	.reset_cfeb1_rxd		(reset_cfeb1_rxd),			// In	VME Reset current phase
+	.hcycle_cfeb1_rxd		(hcycle_cfeb1_rxd),			// In	Half    cycle phase shift
+	.qcycle_cfeb1_rxd		(qcycle_cfeb1_rxd),			// In	Quarter cycle phase shift
+	.phase_cfeb1_rxd		(phase_cfeb1_rxd[5:0]),		// In	Phase to set, 0-255
+	.phaser_busy_cfeb1_rxd	(phaser_busy_cfeb1_rxd),	// Out	Phase shifter busy
+	.phaser_sm_cfeb1_rxd	(phaser_sm_cfeb1_rxd[2:0]),	// Out	Phase shifter machine state
+	.lock_cfeb1_rxd			(lock_cfeb1_rxd),			// Out	DCM lock status
+
+// CFEB2_rxd Phaser VME control/status ports
+	.fire_cfeb2_rxd			(fire_cfeb2_rxd),			// In	Set new phase
+	.reset_cfeb2_rxd		(reset_cfeb2_rxd),			// In	VME Reset current phase
+	.hcycle_cfeb2_rxd		(hcycle_cfeb2_rxd),			// In	Half    cycle phase shift
+	.qcycle_cfeb2_rxd		(qcycle_cfeb2_rxd),			// In	Quarter cycle phase shift
+	.phase_cfeb2_rxd		(phase_cfeb2_rxd[5:0]),		// In	Phase to set, 0-255
+	.phaser_busy_cfeb2_rxd	(phaser_busy_cfeb2_rxd),	// Out	Phase shifter busy
+	.phaser_sm_cfeb2_rxd	(phaser_sm_cfeb2_rxd[2:0]),	// Out	Phase shifter machine state
+	.lock_cfeb2_rxd			(lock_cfeb2_rxd),			// Out	DCM lock status
+
+// CFEB3_rxd Phaser VME control/status ports
+	.fire_cfeb3_rxd			(fire_cfeb3_rxd),			// In	Set new phase
+	.reset_cfeb3_rxd		(reset_cfeb3_rxd),			// In	VME Reset current phase
+	.hcycle_cfeb3_rxd		(hcycle_cfeb3_rxd),			// In	Half    cycle phase shift
+	.qcycle_cfeb3_rxd		(qcycle_cfeb3_rxd),			// In	Quarter cycle phase shift
+	.phase_cfeb3_rxd		(phase_cfeb3_rxd[5:0]),		// In	Phase to set, 0-255
+	.phaser_busy_cfeb3_rxd	(phaser_busy_cfeb3_rxd),	// Out	Phase shifter busy
+	.phaser_sm_cfeb3_rxd	(phaser_sm_cfeb3_rxd[2:0]),	// Out	Phase shifter machine state
+	.lock_cfeb3_rxd			(lock_cfeb3_rxd),			// Out	DCM lock status
+
+// CFEB4_rxd Phaser VME control/status ports
+	.fire_cfeb4_rxd			(fire_cfeb4_rxd),			// In	Set new phase
+	.reset_cfeb4_rxd		(reset_cfeb4_rxd),			// In	VME Reset current phase
+	.hcycle_cfeb4_rxd		(hcycle_cfeb4_rxd),			// In	Half    cycle phase shift
+	.qcycle_cfeb4_rxd		(qcycle_cfeb4_rxd),			// In	Quarter cycle phase shift
+	.phase_cfeb4_rxd		(phase_cfeb4_rxd[5:0]),		// In	Phase to set, 0-255
+	.phaser_busy_cfeb4_rxd	(phaser_busy_cfeb4_rxd),	// Out	Phase shifter busy
+	.phaser_sm_cfeb4_rxd	(phaser_sm_cfeb4_rxd[2:0]),	// Out	Phase shifter machine state
+	.lock_cfeb4_rxd			(lock_cfeb4_rxd)			// Out	DCM lock status
 	);
 
 //------------------------------------------------------------------------------------------------------------------
@@ -1809,7 +1845,6 @@
 	.l1a_window				(l1a_window[MXL1WIND-1:0]),			// In	Level1 Accept window width after delay
 	.l1a_win_pri_en			(l1a_win_pri_en),					// In	Enable L1A window priority
 	.l1a_lookback			(l1a_lookback[MXBADR-1:0]),			// In	Bxn to look back from l1a wr_buf_adr
-	.l1a_preset_sr			(l1a_preset_sr),					// In	Dummy VME bit to feign preset l1a sr group
 
 	.l1a_allow_match		(l1a_allow_match),					// In	Readout allows tmb trig pulse in L1A window (normal mode)
 	.l1a_allow_notmb		(l1a_allow_notmb),					// In	Readout allows no tmb trig pulse in L1A window
@@ -2675,16 +2710,16 @@
 
 	always @* begin
 	if (float_gpio) begin
-	gp_io_[0]	<= 1'bz;
-	gp_io_[1]	<= 1'bz;
-	gp_io_[2]	<= 1'bz;
-	gp_io_[3]	<= 1'bz;
+	gp_io_[0]	= 1'bz;
+	gp_io_[1]	= 1'bz;
+	gp_io_[2]	= 1'bz;
+	gp_io_[3]	= 1'bz;
 	end
 	else begin
-	gp_io_[0]	<= rat_sn_out;				// Out	RAT dsn for debug		jtag_fgpa0 tdo (out) shunted to gp_io1, usually
-	gp_io_[1]	<= alct_crc_err_tp;			// Out	CRC Error test point	jtag_fpga1 tdi (in) 
-	gp_io_[2]	<= alct_vpf_tp;				// Out	Timing test point		jtag_fpga2 tms (in)
-	gp_io_[3]	<= clct_window_tp;			// Out	Timing test point		jtag_fpga3 tck (in)
+	gp_io_[0]	= rat_sn_out;				// Out	RAT dsn for debug		jtag_fgpa0 tdo (out) shunted to gp_io1, usually
+	gp_io_[1]	= alct_crc_err_tp;			// Out	CRC Error test point	jtag_fpga1 tdi (in) 
+	gp_io_[2]	= alct_vpf_tp;				// Out	Timing test point		jtag_fpga2 tms (in)
+	gp_io_[3]	= clct_window_tp;			// Out	Timing test point		jtag_fpga3 tck (in)
 	end
 	end
 
@@ -3190,7 +3225,6 @@
 	.l1a_window				(l1a_window[MXL1WIND-1:0]),			// Out	Level1 Accept window width after delay
 	.l1a_win_pri_en			(l1a_win_pri_en),					// Out	Enable L1A window priority
 	.l1a_lookback			(l1a_lookback[MXBADR-1:0]),			// Out	Bxn to look back from l1a wr_buf_adr
-	.l1a_preset_sr			(l1a_preset_sr),					// Out	Dummy VME bit to feign preset l1a sr group
 
 	.l1a_allow_match		(l1a_allow_match),					// Out	Readout allows tmb trig pulse in L1A window (normal mode)
 	.l1a_allow_notmb		(l1a_allow_notmb),					// Out	Readout allows no tmb trig pulse in L1A window
@@ -3502,27 +3536,75 @@
 	.cfeb3_rxd_posneg		(cfeb3_rxd_posneg),					// Out	CFEB cfeb-to-tmb inter-stage clock select 0 or 180 degrees
 	.cfeb4_rxd_posneg		(cfeb4_rxd_posneg),					// Out	CFEB cfeb-to-tmb inter-stage clock select 0 or 180 degrees
 	
-// Phaser VME control/status ports
-	.dps_fire				(dps_fire[6:0]),					// Out	Set new phase
-	.dps_reset				(dps_reset[6:0]),					// Out	VME Reset current phase
-	.dps_busy				(dps_busy[6:0]),					// In	Phase shifter busy
-	.dps_lock				(dps_lock[6:0]),					// In	PLL lock status
+// ALCT_rxd Phaser VME control/status ports
+	.fire_alct_rxd			(fire_alct_rxd),					// Out	Set new phase
+	.reset_alct_rxd			(reset_alct_rxd),					// Out	VME Reset current phase
+	.hcycle_alct_rxd		(hcycle_alct_rxd),					// Out	Half    cycle phase shift
+	.qcycle_alct_rxd		(qcycle_alct_rxd),					// Out	Quarter cycle phase shift
+	.phase_alct_rxd			(phase_alct_rxd[5:0]),				// Out	Phase to set, 0-255
+	.phaser_busy_alct_rxd	(phaser_busy_alct_rxd),				// In	Phase shifter busy
+	.phaser_sm_alct_rxd		(phaser_sm_alct_rxd[2:0]),			// In	Phase shifter machine state
+	.lock_alct_rxd			(lock_alct_rxd),					// In	DCM lock status
 
-	.dps0_phase				(dps0_phase[7:0]),					// Out	Phase to set, 0-255
-	.dps1_phase				(dps1_phase[7:0]),					// Out	Phase to set, 0-255
-	.dps2_phase				(dps2_phase[7:0]),					// Out	Phase to set, 0-255
-	.dps3_phase				(dps3_phase[7:0]),					// Out	Phase to set, 0-255
-	.dps4_phase				(dps4_phase[7:0]),					// Out	Phase to set, 0-255
-	.dps5_phase				(dps5_phase[7:0]),					// Out	Phase to set, 0-255
-	.dps6_phase				(dps6_phase[7:0]),					// Out	Phase to set, 0-255
+// ALCT_txd Phaser VME control/status ports
+	.fire_alct_txd			(fire_alct_txd),					// Out	Set new phase
+	.reset_alct_txd			(reset_alct_txd),					// Out	VME Reset current phase
+	.hcycle_alct_txd		(hcycle_alct_txd),					// Out	Half    cycle phase shift
+	.qcycle_alct_txd		(qcycle_alct_txd),					// Out	Quarter cycle phase shift
+	.phase_alct_txd			(phase_alct_txd[5:0]),				// Out	Phase to set, 0-255
+	.phaser_busy_alct_txd	(phaser_busy_alct_txd),				// In	Phase shifter busy
+	.phaser_sm_alct_txd		(phaser_sm_alct_txd[2:0]),			// In	Phase shifter machine state
+	.lock_alct_txd			(lock_alct_txd),					// In	DCM lock status
 
-	.dps0_sm_vec			(dps0_sm_vec[2:0]),					// In	Phase shifter machine state
-	.dps1_sm_vec			(dps1_sm_vec[2:0]),					// In	Phase shifter machine state
-	.dps2_sm_vec			(dps2_sm_vec[2:0]),					// In	Phase shifter machine state
-	.dps3_sm_vec			(dps3_sm_vec[2:0]),					// In	Phase shifter machine state
-	.dps4_sm_vec			(dps4_sm_vec[2:0]),					// In	Phase shifter machine state
-	.dps5_sm_vec			(dps5_sm_vec[2:0]),					// In	Phase shifter machine state
-	.dps6_sm_vec			(dps6_sm_vec[2:0]),					// In	Phase shifter machine state
+// CFEB0_rxd Phaser VME control/status ports
+	.fire_cfeb0_rxd			(fire_cfeb0_rxd),					// Out	Set new phase
+	.reset_cfeb0_rxd		(reset_cfeb0_rxd),					// Out	VME Reset current phase
+	.hcycle_cfeb0_rxd		(hcycle_cfeb0_rxd),					// Out	Half    cycle phase shift
+	.qcycle_cfeb0_rxd		(qcycle_cfeb0_rxd),					// Out	Quarter cycle phase shift
+	.phase_cfeb0_rxd		(phase_cfeb0_rxd[5:0]),				// Out	Phase to set, 0-255
+	.phaser_busy_cfeb0_rxd	(phaser_busy_cfeb0_rxd),			// In	Phase shifter busy
+	.phaser_sm_cfeb0_rxd	(phaser_sm_cfeb0_rxd[2:0]),			// In	Phase shifter machine state
+	.lock_cfeb0_rxd			(lock_cfeb0_rxd),					// In	DCM lock status
+
+// CFEB1_rxd Phaser VME control/status ports
+	.fire_cfeb1_rxd			(fire_cfeb1_rxd),					// Out	Set new phase
+	.reset_cfeb1_rxd		(reset_cfeb1_rxd),					// Out	VME Reset current phase
+	.hcycle_cfeb1_rxd		(hcycle_cfeb1_rxd),					// Out	Half    cycle phase shift
+	.qcycle_cfeb1_rxd		(qcycle_cfeb1_rxd),					// Out	Quarter cycle phase shift
+	.phase_cfeb1_rxd		(phase_cfeb1_rxd[5:0]),				// Out	Phase to set, 0-255
+	.phaser_busy_cfeb1_rxd	(phaser_busy_cfeb1_rxd),			// In	Phase shifter busy
+	.phaser_sm_cfeb1_rxd	(phaser_sm_cfeb1_rxd[2:0]),			// In	Phase shifter machine state
+	.lock_cfeb1_rxd			(lock_cfeb1_rxd),					// In	DCM lock status
+
+// CFEB2_rxd Phaser VME control/status ports
+	.fire_cfeb2_rxd			(fire_cfeb2_rxd),					// Out	Set new phase
+	.reset_cfeb2_rxd		(reset_cfeb2_rxd),					// Out	VME Reset current phase
+	.hcycle_cfeb2_rxd		(hcycle_cfeb2_rxd),					// Out	Half    cycle phase shift
+	.qcycle_cfeb2_rxd		(qcycle_cfeb2_rxd),					// Out	Quarter cycle phase shift
+	.phase_cfeb2_rxd		(phase_cfeb2_rxd[5:0]),				// Out	Phase to set, 0-255
+	.phaser_busy_cfeb2_rxd	(phaser_busy_cfeb2_rxd),			// In	Phase shifter busy
+	.phaser_sm_cfeb2_rxd	(phaser_sm_cfeb2_rxd[2:0]),			// In	Phase shifter machine state
+	.lock_cfeb2_rxd			(lock_cfeb2_rxd),					// In	DCM lock status
+
+// CFEB3_rxd Phaser VME control/status ports
+	.fire_cfeb3_rxd			(fire_cfeb3_rxd),					// Out	Set new phase
+	.reset_cfeb3_rxd		(reset_cfeb3_rxd),					// Out	VME Reset current phase
+	.hcycle_cfeb3_rxd		(hcycle_cfeb3_rxd),					// Out	Half    cycle phase shift
+	.qcycle_cfeb3_rxd		(qcycle_cfeb3_rxd),					// Out	Quarter cycle phase shift
+	.phase_cfeb3_rxd		(phase_cfeb3_rxd[5:0]),				// Out	Phase to set, 0-255
+	.phaser_busy_cfeb3_rxd	(phaser_busy_cfeb3_rxd),			// In	Phase shifter busy
+	.phaser_sm_cfeb3_rxd	(phaser_sm_cfeb3_rxd[2:0]),			// In	Phase shifter machine state
+	.lock_cfeb3_rxd			(lock_cfeb3_rxd),					// In	DCM lock status
+
+// CFEB4_rxd Phaser VME control/status ports
+	.fire_cfeb4_rxd			(fire_cfeb4_rxd),					// Out	Set new phase
+	.reset_cfeb4_rxd		(reset_cfeb4_rxd),					// Out	VME Reset current phase
+	.hcycle_cfeb4_rxd		(hcycle_cfeb4_rxd),					// Out	Half    cycle phase shift
+	.qcycle_cfeb4_rxd		(qcycle_cfeb4_rxd),					// Out	Quarter cycle phase shift
+	.phase_cfeb4_rxd		(phase_cfeb4_rxd[5:0]),				// Out	Phase to set, 0-255
+	.phaser_busy_cfeb4_rxd	(phaser_busy_cfeb4_rxd),			// In	Phase shifter busy
+	.phaser_sm_cfeb4_rxd	(phaser_sm_cfeb4_rxd[2:0]),			// In	Phase shifter machine state
+	.lock_cfeb4_rxd			(lock_cfeb4_rxd),					// In	DCM lock status
 
 // Interstage delays
 	.cfeb0_rxd_int_delay	(cfeb_rxd_int_delay[0][3:0]),		// Out	Interstage delay
@@ -3559,8 +3641,8 @@
 //-------------------------------------------------------------------------------------------------------------------
 // Unused Signal Sump
 //-------------------------------------------------------------------------------------------------------------------
-	assign sump = ccb_sump | alct_sump |   rpc_sump   | sequencer_sump | tmb_sump | buf_sump	|
-	vme_sump | rpc_inj_sel | mini_sump | (|cfeb_sump) | inj_ram_sump   | clock_ctrl_sump;
+	assign sump = ccb_sump | alct_sump  |rpc_sump | sequencer_sump | tmb_sump | buf_sump	|
+	vme_sump | rpc_inj_sel | mini_sump | (|cfeb_sump) | inj_ram_sump;
 
 //-------------------------------------------------------------------------------------------------------------------
 	endmodule

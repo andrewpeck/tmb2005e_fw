@@ -6,17 +6,12 @@
 //
 //	05/31/02 Initial
 //	09/25/06 XST mods
-//	07/09/10 Port to ise 12
-//	10/05/10 Check non-blocking operators, add reg init
 //-----------------------------------------------------------------------------------------------------------------
 	module x_delay_os (d,clock,delay,q);
 	
 // Generic
-	parameter  MXDLY =	4;				// Number delay value bits
-	localparam MXSR  =	1 << MXDLY;		// Number delay stages
-
-	initial	$display("x_delay_os: MXDLY=%d",MXDLY);
-	initial	$display("x_delay_os: MXSR =%d",MXSR );
+	parameter MXDLY	=	4;				// Number delay value bits
+	parameter MXSR	=	1 << MXDLY;		// Number delay stages
 
 // Ports
 	input				d;
@@ -25,13 +20,13 @@
 	output				q;
 
 // Inhibit one-shot clips inputs to 1 clock width
-	reg	inhibit=0;
+	reg	inhibit;
 
 	always @(posedge clock) begin
 	inhibit <= d;
 	end
 
-	wire d_oneshot = (d & ~inhibit);
+	wire d_oneshot = d & ~inhibit;
 
 // Delay stages
 	reg	[MXSR-1:1] sr;
@@ -47,7 +42,7 @@
 	end
 
 // Select delayed output
-	wire [MXSR-1:0] srq;
+	wire	[MXSR-1:0]	srq;
 	
 	assign srq[0]		 = d_oneshot;
 	assign srq[MXSR-1:1] = sr;
