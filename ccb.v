@@ -35,6 +35,10 @@
 //	04/22/09 Add recovery to SMs
 //	05/22/09 Fix vme_bx0
 //	09/23/09 Push IO FFs into IOBs
+//	04/27/10 Add bx0 emulator for sync_err checking
+//	04/29/10 Add FF to bx0 emulator
+//	05/13/10 Remove resync from bx0 emulator, add inits to fmm state shadow ff and trig stop ff
+//	06/30/10 Mod injector RAM for alct and l1a bits
 //------------------------------------------------------------------------------------------------------------------
 	module ccb
 	(
@@ -54,6 +58,7 @@
 	clct_status_en,
 	gtl_loop_lcl,
 	ccb_status_oe_lcl,
+	lhc_cycle,
 
 // TMB to CCB
 	clct_status,
@@ -110,8 +115,11 @@
 	alct_ext_trig_vme,
 	clct_ext_trig_vme,
 	ext_trig_both,
-	l1accept_vme,
+	l1a_vme,
 	l1a_delay_vme,
+	l1a_inj_ram,
+	l1a_inj_ram_en,
+	inj_ramout_busy,
 
 // TTC Decoded Commands
 	ttc_bx0,
@@ -130,6 +138,7 @@
 	vme_evcntres,
 	vme_bcntres,
 	vme_bx0,
+	vme_bx0_emu_en,
 	fmm_state,
 
 //	CCB TTC lock status
@@ -148,129 +157,140 @@
 	,l1a_sm_disp
 `endif
 	);
+	
+//------------------------------------------------------------------------------------------------------------------
+// Constants:
+//------------------------------------------------------------------------------------------------------------------
+	parameter MXBXN		=	12;					// Number BXN bits, LHC bunchs numbered 0 to 3563
+
 //------------------------------------------------------------------------------------------------------------------
 // CCB Ports
 //------------------------------------------------------------------------------------------------------------------
-	input			clock;					// 40MHz TMB system clock
-	input			global_reset;			// 1=Reset everything
-	input	[50:0]	_ccb_rx;				// GTLP data from CCB, inverted
-	output	[26:0]	_ccb_tx;				// GTLP data to   CCB, inverted
+	input				clock;					// 40MHz TMB system clock
+	input				global_reset;			// 1=Reset everything
+	input	[50:0]		_ccb_rx;				// GTLP data from CCB, inverted
+	output	[26:0]		_ccb_tx;				// GTLP data to   CCB, inverted
 
 // VME Control Ports
-	input			ccb_ignore_rx;			// 1=Ignore CCB backplane inputs
-	input			ccb_allow_ext_bypass;	// 1=Allow alct/clct_ext_trigger_ccb even if ccb_ignore_rx=1
-	input			ccb_disable_tx;			// 1=Disable CCB backplane outputs
-	input			ccb_int_l1a_en;			// 1=Enable CCB internal l1a emulator
-	input			ccb_ignore_startstop;	// 1=ignore ttc trig_start/stop commands
-	input			alct_status_en;			// 1=Enable status GTL outputs
-	input			clct_status_en;			// 1=Enable status GTL outputs
-	input			gtl_loop_lcl;			// 1=Enable gtl loop mode
-	input			ccb_status_oe_lcl;		// 1=Enable status GTL outputs
+	input				ccb_ignore_rx;			// 1=Ignore CCB backplane inputs
+	input				ccb_allow_ext_bypass;	// 1=Allow alct/clct_ext_trigger_ccb even if ccb_ignore_rx=1
+	input				ccb_disable_tx;			// 1=Disable CCB backplane outputs
+	input				ccb_int_l1a_en;			// 1=Enable CCB internal l1a emulator
+	input				ccb_ignore_startstop;	// 1=ignore ttc trig_start/stop commands
+	input				alct_status_en;			// 1=Enable status GTL outputs
+	input				clct_status_en;			// 1=Enable status GTL outputs
+	input				gtl_loop_lcl;			// 1=Enable gtl loop mode
+	input				ccb_status_oe_lcl;		// 1=Enable status GTL outputs
+	input	[MXBXN-1:0]	lhc_cycle;				// LHC period, max BXN count+1
 
 // TMB signals transmitted to CCB
-	input	[8:0]	clct_status;			// CLCT status for CCB front panel (VME sets status_oe)
-	input	[8:0]	alct_status;			// ALCT status for CCB front panel
-	input			tmb_cfg_done;			// FPGA loaded
-	input			alct_cfg_done;			// FPGA loaded
-	input	[4:0]	tmb_reserved_in;		// Unassigned
+	input	[8:0]		clct_status;			// CLCT status for CCB front panel (VME sets status_oe)
+	input	[8:0]		alct_status;			// ALCT status for CCB front panel
+	input				tmb_cfg_done;			// FPGA loaded
+	input				alct_cfg_done;			// FPGA loaded
+	input	[4:0]		tmb_reserved_in;		// Unassigned
 
 // TMB Command Word
-	output	[7:0]	ccb_cmd;				// CCB command word
-	output			ccb_cmd_strobe;			// CCB command word strobe
-	output			ccb_data_strobe;		// CCB data word strobe
-	output			ccb_subaddr_strobe;		// CCB subaddress strobe
+	output	[7:0]		ccb_cmd;				// CCB command word
+	output				ccb_cmd_strobe;			// CCB command word strobe
+	output				ccb_data_strobe;		// CCB data word strobe
+	output				ccb_subaddr_strobe;		// CCB subaddress strobe
 
 // TMB signals received from CCB
-	output			ccb_clock40_enable;		// Enable 40MHz clock
-	output	[4:0]	ccb_reserved;			// Unassigned
-	output			ccb_evcntres;			// Event counter reset
-	output			ccb_bcntres;			// Bunch crossing counter reset
-	output			ccb_bx0;				// Bunch crossing zero
-	output			ccb_l1accept;			// Level 1 Accept
+	output				ccb_clock40_enable;		// Enable 40MHz clock
+	output	[4:0]		ccb_reserved;			// Unassigned
+	output				ccb_evcntres;			// Event counter reset
+	output				ccb_bcntres;			// Bunch crossing counter reset
+	output				ccb_bx0;				// Bunch crossing zero
+	output				ccb_l1accept;			// Level 1 Accept
 
-	output			tmb_hard_reset;			// Reload TMB  FPGA
-	output			alct_hard_reset;		// Reload ALCT FPGA
-	output	[1:0]	tmb_reserved;			// Unassigned
-	output			alct_adb_pulse_sync;	// ALCT synchronous  test pulse
-	output			alct_adb_pulse_async;	// ALCT asynchronous test pulse
-	output			clct_ext_trig;			// CLCT external trigger
-	output			alct_ext_trig;			// ALCT external trigger
-	output			dmb_ext_trig;			// DMB  external trigger
-	output	[2:0]	tmb_reserved_out;		// Unassigned
-	output			ccb_sump;				// Unused signals
+	output				tmb_hard_reset;			// Reload TMB  FPGA
+	output				alct_hard_reset;		// Reload ALCT FPGA
+	output	[1:0]		tmb_reserved;			// Unassigned
+	output				alct_adb_pulse_sync;	// ALCT synchronous  test pulse
+	output				alct_adb_pulse_async;	// ALCT asynchronous test pulse
+	output				clct_ext_trig;			// CLCT external trigger
+	output				alct_ext_trig;			// ALCT external trigger
+	output				dmb_ext_trig;			// DMB  external trigger
+	output	[2:0]		tmb_reserved_out;		// Unassigned
+	output				ccb_sump;				// Unused signals
 
 // Monitored DMB Signals
-	output	[2:0]	dmb_cfeb_calibrate;		// DMB calibration
-	output			dmb_l1a_release;		// DMB test
-	output	[4:0]	dmb_reserved_out;		// DMB unassigned
-	output	[2:0]	dmb_reserved_in;		// DMB unassigned
+	output	[2:0]		dmb_cfeb_calibrate;		// DMB calibration
+	output				dmb_l1a_release;		// DMB test
+	output	[4:0]		dmb_reserved_out;		// DMB unassigned
+	output	[2:0]		dmb_reserved_in;		// DMB unassigned
 
 // DMB Received
-	input	[5:0]	dmb_rx;					// DMB Received data
-	output	[5:0]	dmb_rx_ff;				// DMB latched for VME
+	input	[5:0]		dmb_rx;					// DMB Received data
+	output	[5:0]		dmb_rx_ff;				// DMB latched for VME
 
 // MPC Muon Accept (not latched or inverted here)
-	output	[1:0]	mpc_in;					// MPC muon accept reply
+	output	[1:0]		mpc_in;					// MPC muon accept reply
 
 // Level 1 Accept Ports from VME and Sequencer
-	input			clct_ext_trig_l1aen;	// 1=Request ccb l1a on clct ext_trig
-	input			alct_ext_trig_l1aen;	// 1=Request ccb l1a on alct ext_trig
-	input			seq_trig_l1aen;			// 1=Request ccb l1a on sequencer trigger
-	input			seq_trigger;			// Sequencer requests L1A from CCB
+	input				clct_ext_trig_l1aen;	// 1=Request ccb l1a on clct ext_trig
+	input				alct_ext_trig_l1aen;	// 1=Request ccb l1a on alct ext_trig
+	input				seq_trig_l1aen;			// 1=Request ccb l1a on sequencer trigger
+	input				seq_trigger;			// Sequencer requests L1A from CCB
 
 // Trigger ports from VME
-	input			alct_ext_trig_vme;		// 1=Fire alct_ext_trig oneshot
-	input			clct_ext_trig_vme;		// 1=Fire clct_ext_trig oneshot
-	input			ext_trig_both;			// 1=clct_ext_trig fires alct and alct fires clct_trig, DC level
-	input			l1accept_vme;			// 1=fire ccb_l1accept oneshot
-	input	[7:0]	l1a_delay_vme;			// Internal L1A delay
+	input				alct_ext_trig_vme;		// 1=Fire alct_ext_trig oneshot
+	input				clct_ext_trig_vme;		// 1=Fire clct_ext_trig oneshot
+	input				ext_trig_both;			// 1=clct_ext_trig fires alct and alct fires clct_trig, DC level
+	input				l1a_vme;				// 1=fire ccb_l1accept oneshot
+	input	[7:0]		l1a_delay_vme;			// Internal L1A delay
+	input				l1a_inj_ram;			// L1A injector RAM pulse
+	input				l1a_inj_ram_en;			// L1A injector RAM enable
+	input				inj_ramout_busy;		// Injector RAM busy
 
 // TTC Decoded Commands
-	output			ttc_bx0;				// Bunch crossing zero
-	output			ttc_resync;				// Purge l1a processing stack
-	output			ttc_bxreset;			// Reset bxn
-	output			ttc_mpc_inject;			// Start MPC injector
-	output			ttc_orbit_reset;		// Reset orbit counter
-	output			fmm_trig_stop;			// Stop clct trigger sequencer
+	output				ttc_bx0;				// Bunch crossing zero
+	output				ttc_resync;				// Purge l1a processing stack
+	output				ttc_bxreset;			// Reset bxn
+	output				ttc_mpc_inject;			// Start MPC injector
+	output				ttc_orbit_reset;		// Reset orbit counter
+	output				fmm_trig_stop;			// Stop clct trigger sequencer
 
 // VME
-	input			vme_ccb_cmd_enable;		// Disconnect ccb_cmd_bpl, use vme_ccb_cmd;
-	input	[7:0]	vme_ccb_cmd;			// CCB command word
-	input			vme_ccb_cmd_strobe;		// CCB command word strobe
-	input			vme_ccb_data_strobe;	// CCB data word strobe
-	input			vme_ccb_subaddr_strobe;	// CCB subaddress strobe
-	input			vme_evcntres;			// Event counter reset, from VME
-	input			vme_bcntres;			// Bunch crossing counter reset, from VME
-	input			vme_bx0;				// Bunch crossing zero, from VME
-	output	[2:0]	fmm_state;				// FMM machine state
+	input				vme_ccb_cmd_enable;		// Disconnect ccb_cmd_bpl, use vme_ccb_cmd;
+	input	[7:0]		vme_ccb_cmd;			// CCB command word
+	input				vme_ccb_cmd_strobe;		// CCB command word strobe
+	input				vme_ccb_data_strobe;	// CCB data word strobe
+	input				vme_ccb_subaddr_strobe;	// CCB subaddress strobe
+	input				vme_evcntres;			// Event counter reset, from VME
+	input				vme_bcntres;			// Bunch crossing counter reset, from VME
+	input				vme_bx0;				// Bunch crossing zero, from VME
+	input				vme_bx0_emu_en;			// BX0 emulator enable
+	output	[2:0]		fmm_state;				// FMM machine state
 
 //	CCB TTC lock status
-	input			cnt_all_reset;			// Trigger/Readout counter reset
-	output			ccb_ttcrx_lock_never;	// Lock never achieved
-	output			ccb_ttcrx_lost_ever;	// Lock was lost at least once
-	output	[7:0]	ccb_ttcrx_lost_cnt;		// Number of times lock has been lost
-	output			ccb_qpll_lock_never;	// Lock never achieved
-	output			ccb_qpll_lost_ever;		// Lock was lost at least once
-	output	[7:0]	ccb_qpll_lost_cnt;		// Number of times lock has been lost
+	input				cnt_all_reset;			// Trigger/Readout counter reset
+	output				ccb_ttcrx_lock_never;	// Lock never achieved
+	output				ccb_ttcrx_lost_ever;	// Lock was lost at least once
+	output	[7:0]		ccb_ttcrx_lost_cnt;		// Number of times lock has been lost
+	output				ccb_qpll_lock_never;	// Lock never achieved
+	output				ccb_qpll_lost_ever;		// Lock was lost at least once
+	output	[7:0]		ccb_qpll_lost_cnt;		// Number of times lock has been lost
 
 // Debug
 `ifdef DEBUG_CCB
-	output			sm_reset;				// State machine reset
-	output	[55:0]	fmm_sm_disp;			// FMM machine state ascii display
-	output	[55:0]	l1a_sm_disp;			// L1A machine state ascii display
+	output				sm_reset;				// State machine reset
+	output	[55:0]		fmm_sm_disp;			// FMM machine state ascii display
+	output	[55:0]		l1a_sm_disp;			// L1A machine state ascii display
 `endif
 
 //------------------------------------------------------------------------------------------------------------------
 // Local
 //------------------------------------------------------------------------------------------------------------------
-	wire	[7:0]	ccb_data_gtl;
-	wire	[7:0]	ccb_cmd_gtl;
-	wire			ccb_cmd_strobe_gtl;
-	wire			ccb_data_strobe_gtl;
-	wire			alct_ext_trigger_ccb;
-	wire			clct_ext_trigger_ccb;
-	wire			ccb_l1accept_ccb;
-	wire			l1a_done;
+	wire	[7:0]		ccb_data_gtl;
+	wire	[7:0]		ccb_cmd_gtl;
+	wire				ccb_cmd_strobe_gtl;
+	wire				ccb_data_strobe_gtl;
+	wire				alct_ext_trigger_ccb;
+	wire				clct_ext_trigger_ccb;
+	wire				ccb_l1accept_ccb;
+	wire				l1a_done;
 
 //---------------------------------------------------------------------------------------------------------------------
 //	Power-up Section:
@@ -422,7 +442,7 @@
 	end
 
 // Map decoded signal names: per CCB 2001 spec version 2.2 01/06/2003
-	wire ttc_bx0					= ccb_cmd_dec['h01];	// Bunch Crossing Zero 	
+	wire ttc_bx0_dec				= ccb_cmd_dec['h01];	// Bunch Crossing Zero 	
 	wire ttc_resync					= ccb_cmd_dec['h03];	// Reset L1 readout buffers and resynchronize optical links 	
 //	wire ttc_hard_reset				= ccb_cmd_dec['h04];	// Reload all FPGAs from EPROMs 	
 	wire ttc_start_trigger			= ccb_cmd_dec['h06];	// 
@@ -517,25 +537,42 @@
 	end
 
 // Internal L1A Generator Counter
-	parameter MXL1DELAY = 8; // L1Acc delay counter bits
-	reg [MXL1DELAY-1:0] l1a_delay_cnt = 0;
+	reg [7:0] l1a_delay_cnt = 0;
 
 	always @(posedge clock) begin
 	if		(l1a_sm == idle) l1a_delay_cnt = 0;						// sync clear
 	else if	(l1a_sm != idle) l1a_delay_cnt = l1a_delay_cnt + 1;		// sync count
 	end
 
-	assign l1a_done = l1a_delay_cnt == l1a_delay_vme;
+	assign l1a_done      = l1a_delay_cnt == l1a_delay_vme;
 	wire   int_l1a_pulse = l1a_done;
 
 // Multiplex Level 1 Accepts from CCB, VME and Internal delay generator
 	reg ccb_l1accept = 0;
 
-	x_oneshot uvmel1a (.d(l1accept_vme),.clock(clock),.q(l1accept_vme_pulse));
+	x_oneshot uvmel1a (.d(l1a_vme),.clock(clock),.q(l1a_vme_pulse));
 
 	always @(posedge clock) begin
-	ccb_l1accept <= ccb_l1accept_ccb | l1accept_vme_pulse | int_l1a_pulse;
+	ccb_l1accept <= ccb_l1accept_ccb | l1a_vme_pulse | int_l1a_pulse | (l1a_inj_ram & l1a_inj_ram_en & inj_ramout_busy);
 	end
+
+// Internal bx0  emulator
+	reg [MXBXN-1:0]	bxn_emu = 0;							// LHC period, max BXN count+1
+	reg             bx0_emu = 0;
+
+	wire bxn_emu_ovf  	= bxn_emu == lhc_cycle[11:0]-1;		// BXN maximum count for pretrig bxn counter
+	wire bxn_emu_reset	= bxn_emu_ovf || !vme_bx0_emu_en;
+
+	always @(posedge clock) begin
+	if (bxn_emu_reset) bxn_emu <= 0;
+	else               bxn_emu <= bxn_emu + 1'b1;
+	end
+
+	always @(posedge clock) begin
+	bx0_emu <= (bxn_emu==0);									// emulator bxn wrapped to bx0
+	end
+
+	assign ttc_bx0 = (vme_bx0_emu_en) ? bx0_emu : ttc_bx0_dec;	// select ttc bx0 or emulator bx0
 
 //---------------------------------------------------------------------------------------------------------------------
 //	FMM Section:
@@ -566,7 +603,7 @@
 
 	fmm_resync:							// Resync
 		if (ttc_bx0)					// Bx0 arrived 1bx after resync
-		fmm_sm = fmm_run;		
+		 fmm_sm = fmm_run;		
 		else 
 		 fmm_sm = fmm_wait_bx0;
 
@@ -591,7 +628,7 @@
 	end
 
 // FMM Control signals
-	reg fmm_trig_stop = 0;
+	reg fmm_trig_stop = 1;									// Power up stop state
 
 	always @(posedge clock) begin
 	if (sm_reset)	fmm_trig_stop <= 1;						// sync reset
@@ -599,7 +636,7 @@
 	end
 
 // Monitor FFM state
-	reg [2:0] fmm_state;
+	reg [2:0] fmm_state=0;
 	always @(posedge clock) begin
 	case (fmm_sm)
 	fmm_startup:	fmm_state <= 0;

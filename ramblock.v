@@ -22,11 +22,15 @@
 	dang
 	);
 
+//-------------------------------------------------------------------------------------------------------------------
 // Generics caller may override
+//-------------------------------------------------------------------------------------------------------------------
 	parameter RAM_WIDTH = 9;				// Data width+parity
 	parameter RAM_ADRB 	= 11;				// Address bits
 
+//-------------------------------------------------------------------------------------------------------------------
 // Ports
+//-------------------------------------------------------------------------------------------------------------------
 	input					clock;			// Write clock
 
 	input					wr_wea;			// Write enable			port A
@@ -38,7 +42,9 @@
 	output	[RAM_WIDTH-1:0]	rd_datab;		// Read  data			port B
 	output					dang;			// Dangling pin sump	port A/B
 
+//-------------------------------------------------------------------------------------------------------------------
 // Expand data bus widths for an integer number of S9 RAMs
+//-------------------------------------------------------------------------------------------------------------------
 	parameter s9    = 9;					// Bits per RAM
 	parameter nrams = (RAM_WIDTH-1)/s9+1;	// Number of RAMs needed for that many bits
 	parameter nbits = nrams*s9;				// Number of bits to span those RAMs

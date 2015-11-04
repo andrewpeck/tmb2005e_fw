@@ -16,6 +16,8 @@
 //	01/24/08 FF buffer fence dist to increase clock speed, power up with q empty ff set
 //	04/22/08 Tune read_adr_offset for new pre-trigger state machine
 //	11/15/08 Add data array to queue storage
+//	05/26/10 Rename sump
+//	06/26/10 Add stalled_once signal
 //-------------------------------------------------------------------------------------------------------------------
 	module buffer_write_ctrl
 	(
@@ -58,11 +60,12 @@
 	buf_q_udf_err,
 	buf_q_adr_err,
 	buf_stalled,
+	buf_stalled_once,
 	buf_fence_dist,
 	buf_fence_cnt,
 	buf_fence_cnt_peak,
 	buf_display,
-	sump
+	buf_sump
 
 // Debug
 `ifdef DEBUG_BUFFER_WRITE_CTRL
@@ -82,10 +85,12 @@
 `endif
 	);
 
+//------------------------------------------------------------------------------------------------------------------
 // Constants
-	parameter MXTBIN			=	5;			// Time bin address width
-	parameter READ_ADR_OFFSET	=	6;			// Number clocks from first address to pretrigger adr latch, tuned 04/22/08
-	parameter PRESTORE_SAFETY	=	2;			// Pre-store safety beyond pre-trig tbins
+//------------------------------------------------------------------------------------------------------------------
+	parameter MXTBIN			= 5;			// Time bin address width
+	parameter READ_ADR_OFFSET	= 6;			// Number clocks from first address to pretrigger adr latch, tuned 04/22/08
+	parameter PRESTORE_SAFETY	= 2;			// Pre-store safety beyond pre-trig tbins
 
 // Queue RAM parameters
 	parameter RAM_DEPTH			= 2048;			// Storage bx depth
@@ -93,19 +98,22 @@
 	parameter MXBADR			= RAM_ADRB;		// Pushed address width
 	parameter MXBDATA			= 32;			// Pushed data width
 	
-// CCB Ports
+//------------------------------------------------------------------------------------------------------------------
+// Ports
+//------------------------------------------------------------------------------------------------------------------
+// CCB
 	input					clock;				// 40MHz TMB main clock
 	input					ttc_resync;			// Resync TMB
 
-// CFEB Raw Hits FIFO RAM Ports
+// CFEB Raw Hits FIFO RAM
 	output					fifo_wen;			// 1=Write enable FIFO RAM
 	output	[RAM_ADRB-1:0]	fifo_wadr;			// FIFO RAM write address
 
-// CFEB VME Configuration Ports
+// CFEB VME Configuration
 	input	[MXTBIN-1:0]	fifo_pretrig_cfeb;	// Number FIFO time bins before pretrigger
 	input					fifo_no_raw_hits;	// 1=do not wait to store raw hits
 
-// RPC VME Configuration Ports
+// RPC VME Configuration
 	input	[MXTBIN-1:0]	fifo_pretrig_rpc;	// Number FIFO time bins before pretrigger
 
 // Fence Buffer Write Control
@@ -131,12 +139,13 @@
 	output					buf_q_ovf_err;		// Tried to push when queue full
 	output					buf_q_udf_err;		// Tried to pop when queue empty
 	output					buf_q_adr_err;		// Fence adr popped from queue doesnt match rls adr
-	output					buf_stalled;		// Buffer write pointer hit a fence and stalled
+	output					buf_stalled;		// Buffer write pointer hit a fence and is stalled now
+	output					buf_stalled_once;	// Buffer stalled at least once since last resync
 	output	[MXBADR-1:0]	buf_fence_dist;		// Distance to 1st fence address
 	output	[MXBADR-1+1:0]	buf_fence_cnt;		// Number of fences in fence RAM currently
 	output	[MXBADR-1+1:0]	buf_fence_cnt_peak;	// Peak number of fences in fence RAM
 	output	[7:0]			buf_display;		// Buffer fraction in use display
-	output					sump; 				// Unused signals
+	output					buf_sump; 			// Unused signals
 
 // Debug
 `ifdef DEBUG_BUFFER_WRITE_CTRL
@@ -254,8 +263,15 @@
 	end
 
 // Buffer fence distance and stall indicator for display and VME
+	reg buf_stalled_once=0;
+
 	assign buf_fence_dist	= fence_dist;
 	assign buf_stalled		= (buf_sm == bsm_hold);
+
+	always @(posedge clock) begin
+	if      (reset      ) buf_stalled_once <= 0;
+	else if (buf_stalled) buf_stalled_once <= 1;
+	end	
 
 // Buffer fraction in use display
 	wire [MXBADR-1:0] used_space = 2047-fence_dist;
@@ -334,6 +350,9 @@
 
 	assign wr_buf_adr   = fifo_wadr;														// RAM write address for raw hits and header
 	assign wr_buf_ready = !hit_fence && (buf_sm == bsm_run) && (fence_dist>fence_dist_min);	// Buffer ready to pre-trigger
+
+// Unused signals
+	assign buf_sump = sump;
 
 //------------------------------------------------------------------------------------------------------------------
 // Debug

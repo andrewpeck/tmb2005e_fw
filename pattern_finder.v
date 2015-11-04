@@ -50,6 +50,9 @@
 // 04/23/09 Mod for ise 10.1i
 // 08/20/09 Add register balancing
 // 08/21/09 Take out register balancing, ise8.2 does not need it
+// 02/04/10 Reverse type b layers
+// 02/10/10 Add type b active feb case
+// 03/19/10 Mod busy hs delimiters for me1a me1b cscs to separate cfeb4
 //-------------------------------------------------------------------------------------------------------------------
 	module pattern_finder
 	(
@@ -128,12 +131,18 @@
 	,purge_sm_dsp
 	,reset
 	,lock
+
 	,lyr_thresh_pretrig_ff
 	,hit_thresh_pretrig_ff
 	,pid_thresh_pretrig_ff
 	,dmb_thresh_pretrig_ff
 	,cfeb_en_ff
 	,layer_trig_en_ff
+
+	,busy_min
+	,busy_max
+	,busy_key
+	,clct0_is_on_me1a
 `endif
 	);
 
@@ -239,12 +248,19 @@
 	output	[55:0]			purge_sm_dsp;
 	output					reset;
 	output					lock;
+
 	output	[MXHITB-1:0]	lyr_thresh_pretrig_ff;
 	output	[MXHITB-1:0]	hit_thresh_pretrig_ff;
 	output	[MXPIDB-1:0]	pid_thresh_pretrig_ff;
 	output	[MXHITB-1:0]	dmb_thresh_pretrig_ff;
 	output	[MXCFEB-1:0]	cfeb_en_ff;
 	output					layer_trig_en_ff;
+
+	output	[MXKEYBX-1:0]	busy_min;
+	output	[MXKEYBX-1:0]	busy_max;
+	output	[MXHSX-1:0]		busy_key;
+	output					clct0_is_on_me1a;
+
 `endif
 //-------------------------------------------------------------------------------------------------------------------
 // Load global definitions
@@ -410,6 +426,7 @@
 //-------------------------------------------------------------------------------------------------------------------
 `ifdef CSC_TYPE_A
 `define	STAGGER_HS_CSC
+`define CSC_TYPE_A_or_CSC_TYPE_B
 `define CSC_TYPE_A_or_CSC_TYPE_C
 
 	wire [MXHS*5-1:0] me1234_ly0hs; 
@@ -441,6 +458,7 @@
 //-------------------------------------------------------------------------------------------------------------------
 `elsif CSC_TYPE_B
 `define	STAGGER_HS_CSC
+`define CSC_TYPE_A_or_CSC_TYPE_B
 
 	wire [MXHS*5-1:0] me1234_ly0hs; 
 	wire [MXHS*5-1:0] me1234_ly1hs; 
@@ -504,19 +522,20 @@
 	end
 	endgenerate
 
-// Reverse all CFEBs
-	assign me1234_ly0hs = {cfeb0_ly0hsr, cfeb1_ly0hsr, cfeb2_ly0hsr, cfeb3_ly0hsr, cfeb4_ly0hsr};
-	assign me1234_ly1hs = {cfeb0_ly1hsr, cfeb1_ly1hsr, cfeb2_ly1hsr, cfeb3_ly1hsr, cfeb4_ly1hsr};
-	assign me1234_ly2hs = {cfeb0_ly2hsr, cfeb1_ly2hsr, cfeb2_ly2hsr, cfeb3_ly2hsr, cfeb4_ly2hsr};
-	assign me1234_ly3hs = {cfeb0_ly3hsr, cfeb1_ly3hsr, cfeb2_ly3hsr, cfeb3_ly3hsr, cfeb4_ly3hsr};
-	assign me1234_ly4hs = {cfeb0_ly4hsr, cfeb1_ly4hsr, cfeb2_ly4hsr, cfeb3_ly4hsr, cfeb4_ly4hsr};
-	assign me1234_ly5hs = {cfeb0_ly5hsr, cfeb1_ly5hsr, cfeb2_ly5hsr, cfeb3_ly5hsr, cfeb4_ly5hsr};
+// Reverse all CFEBs and reverse layers
+	assign me1234_ly5hs = {cfeb0_ly0hsr, cfeb1_ly0hsr, cfeb2_ly0hsr, cfeb3_ly0hsr, cfeb4_ly0hsr};
+	assign me1234_ly4hs = {cfeb0_ly1hsr, cfeb1_ly1hsr, cfeb2_ly1hsr, cfeb3_ly1hsr, cfeb4_ly1hsr};
+	assign me1234_ly3hs = {cfeb0_ly2hsr, cfeb1_ly2hsr, cfeb2_ly2hsr, cfeb3_ly2hsr, cfeb4_ly2hsr};
+	assign me1234_ly2hs = {cfeb0_ly3hsr, cfeb1_ly3hsr, cfeb2_ly3hsr, cfeb3_ly3hsr, cfeb4_ly3hsr};
+	assign me1234_ly1hs = {cfeb0_ly4hsr, cfeb1_ly4hsr, cfeb2_ly4hsr, cfeb3_ly4hsr, cfeb4_ly4hsr};
+	assign me1234_ly0hs = {cfeb0_ly5hsr, cfeb1_ly5hsr, cfeb2_ly5hsr, cfeb3_ly5hsr, cfeb4_ly5hsr};
 
 //-------------------------------------------------------------------------------------------------------------------
 // Stage 4A3: CSC_TYPE_C Normal ME1B reversed ME1A
 //-------------------------------------------------------------------------------------------------------------------
 `elsif CSC_TYPE_C
 `define CSC_TYPE_A_or_CSC_TYPE_C
+`define CSC_TYPE_C_or_CSC_TYPE_D
 
 	wire [MXHS*1-1:0] me1a_ly0hs;
 	wire [MXHS*1-1:0] me1a_ly1hs;
@@ -575,6 +594,8 @@
 // Stage 4A4: CSC_TYPE_D Normal ME1A reversed ME1B
 //-------------------------------------------------------------------------------------------------------------------
 `elsif CSC_TYPE_D
+`define CSC_TYPE_C_or_CSC_TYPE_D
+
 	wire [MXHS*1-1:0] me1a_ly0hs;
 	wire [MXHS*1-1:0] me1a_ly1hs;
 	wire [MXHS*1-1:0] me1a_ly2hs;
@@ -657,7 +678,7 @@
 //-------------------------------------------------------------------------------------------------------------------
 `else
 	initial $display ("CSC_TYPE Undefined. Halting.");
-//	$stop
+	$stop
 `endif
 
 //-------------------------------------------------------------------------------------------------------------------
@@ -911,7 +932,26 @@
 	hs_key_dmb3[ihs] = (hs_hit_pre_s0[ihs+MXHS*3] >= dmb_thresh_pretrig_ff);
 	hs_key_dmb4[ihs] = (hs_hit_pre_s0[ihs+MXHS*4] >= dmb_thresh_pretrig_ff);
 
-`else
+`elsif CSC_TYPE_B				// Reversed CSC
+	hs_key_hit0[ihs] = (hs_hit_pre_s0[MXHS*5-1-ihs] >= hit_thresh_pretrig_ff);	// Reversed CSC
+	hs_key_hit1[ihs] = (hs_hit_pre_s0[MXHS*4-1-ihs] >= hit_thresh_pretrig_ff);
+	hs_key_hit2[ihs] = (hs_hit_pre_s0[MXHS*3-1-ihs] >= hit_thresh_pretrig_ff);
+	hs_key_hit3[ihs] = (hs_hit_pre_s0[MXHS*2-1-ihs] >= hit_thresh_pretrig_ff);
+	hs_key_hit4[ihs] = (hs_hit_pre_s0[MXHS*1-1-ihs] >= hit_thresh_pretrig_ff);
+
+	hs_key_pid0[ihs] = (hs_pid_pre_s0[MXHS*5-1-ihs] >= pid_thresh_pretrig_ff);
+	hs_key_pid1[ihs] = (hs_pid_pre_s0[MXHS*4-1-ihs] >= pid_thresh_pretrig_ff);
+	hs_key_pid2[ihs] = (hs_pid_pre_s0[MXHS*3-1-ihs] >= pid_thresh_pretrig_ff);
+	hs_key_pid3[ihs] = (hs_pid_pre_s0[MXHS*2-1-ihs] >= pid_thresh_pretrig_ff);
+	hs_key_pid4[ihs] = (hs_pid_pre_s0[MXHS*1-1-ihs] >= pid_thresh_pretrig_ff);
+
+	hs_key_dmb0[ihs] = (hs_hit_pre_s0[MXHS*5-1-ihs] >= dmb_thresh_pretrig_ff);
+	hs_key_dmb1[ihs] = (hs_hit_pre_s0[MXHS*4-1-ihs] >= dmb_thresh_pretrig_ff);
+	hs_key_dmb2[ihs] = (hs_hit_pre_s0[MXHS*3-1-ihs] >= dmb_thresh_pretrig_ff);
+	hs_key_dmb3[ihs] = (hs_hit_pre_s0[MXHS*2-1-ihs] >= dmb_thresh_pretrig_ff);
+	hs_key_dmb4[ihs] = (hs_hit_pre_s0[MXHS*1-1-ihs] >= dmb_thresh_pretrig_ff);
+
+`else							// Reversed ME1B
 	hs_key_hit0[ihs] = (hs_hit_pre_s0[MXHS*4-1-ihs] >= hit_thresh_pretrig_ff);	// Reversed ME1B, not reversed ME1A
 	hs_key_hit1[ihs] = (hs_hit_pre_s0[MXHS*3-1-ihs] >= hit_thresh_pretrig_ff);
 	hs_key_hit2[ihs] = (hs_hit_pre_s0[MXHS*2-1-ihs] >= hit_thresh_pretrig_ff);
@@ -1103,7 +1143,7 @@
 	wire [7:0] pspan_ram;
 
 	assign nspan_ram = rdatab[ 7:0];
-	assign pspan_ram = rdatab[15:8] ;
+	assign pspan_ram = rdatab[15:8];
 
 // Multiplex with single-parameter busy key span from vme
  	reg [7:0] nspan;
@@ -1114,13 +1154,41 @@
 	pspan <= (clct_sep_src) ? clct_sep_vme : pspan_ram;
 	end
 
-// Latch busy key 1/2-strips for excluding 2nd clct
-	reg  [MXHSX-1:0]	busy_key;
-	wire [MXKEYBX-1:0]	busy_min;
-	wire [MXKEYBX-1:0]	busy_max;
+// CSC Type A or B delimiters for excluding 2nd clct span hs0-159
+	reg [MXKEYBX-1:0] busy_min;
+	reg [MXKEYBX-1:0] busy_max;
 
-	assign busy_max = (hs_key_s2 <= 159-pspan) ? hs_key_s2+pspan : 159;	// Limit busy list to range 0-159
-	assign busy_min = (hs_key_s2 >= nspan    ) ? hs_key_s2-nspan : 0;
+	`ifdef CSC_TYPE_A_or_CSC_TYPE_B
+
+	always @* begin
+	busy_max <= (hs_key_s2 <= 159-pspan) ? hs_key_s2+pspan : 159;	// Limit busy list to range 0-159
+	busy_min <= (hs_key_s2 >= nspan    ) ? hs_key_s2-nspan : 0;
+	end
+
+// CSC Type C or D delimiters for excluding 2nd clct span ME1B hs0-127  ME1A hs128-159
+	`elsif CSC_TYPE_C_or_CSC_TYPE_D
+
+	wire clct0_is_on_me1a = hs_key_s2[MXKEYBX-1];
+	
+	always @* begin
+	if (clct0_is_on_me1a) begin	// CLCT0 is on ME1A cfeb4, limit blanking region to 128-159
+	busy_max <= (hs_key_s2 <= 159-pspan) ? hs_key_s2+pspan : 159;
+	busy_min <= (hs_key_s2 >= 128+nspan) ? hs_key_s2-nspan : 128;
+	end
+	else begin					// CLCT0 is on ME1B cfeb0-cfeb3, limit blanking region to 0-127
+	busy_max <= (hs_key_s2 <= 127-pspan) ? hs_key_s2+pspan : 127;
+	busy_min <= (hs_key_s2 >=     nspan) ? hs_key_s2-nspan : 0;
+	end
+	end
+
+// CSC Type missing
+	`else
+	initial $display ("CSC_TYPE undefined for 2nd clct delimiters in pattern_finder.v: Halting");
+	$stop
+	`endif
+
+// Latch busy key 1/2-strips for excluding 2nd clct
+	reg [MXHSX-1:0] busy_key;
 
 	genvar ikey;
 	generate

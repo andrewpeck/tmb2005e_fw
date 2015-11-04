@@ -17,8 +17,11 @@
 //--------------------------------------------------------------------------------------------------------
 
 	module x_demux_ddr(din,clock,aset,aclr,dout1st,dout2nd);
+
+// Generic
 	parameter WIDTH = 1;
-//
+
+// Ports
 	input	[WIDTH-1:0]	din;
 	input				clock;
 	input				aset;

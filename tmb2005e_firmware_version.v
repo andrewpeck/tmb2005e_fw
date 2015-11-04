@@ -4,7 +4,7 @@
 // Firmware version global definitions
 	`define FIRMWARE_TYPE		04'hC		// C=Normal CLCT/TMB, D=Debug PCB loopback version
 	`define VERSION				04'hE		// Version revision number, A=TMB2004 and earlier, E=TMB2005E production
-	`define MONTHDAY			16'h0114	// Version date
+	`define MONTHDAY			16'h0707	// Version date
 	`define YEAR				16'h2010	// Version date
 	`define FPGAID				16'h4000	// FPGA Type XC2Vnnnn
 	`define ISE_VERSION			16'h0823	// ISE Compiler version 8.2i sp3 or 10.1i sp3
@@ -15,13 +15,14 @@
 	`define AUTO_PHASER			01'h1		// Automatically initialize PHASER machines from PROM data, 0=do not
 	`define ALCT_MUONIC			01'h1		// Floats ALCT board  in clock-space with independent time-of-flight delay
 	`define CFEB_MUONIC			01'h1		// Floats CFEB boards in clock-space with independent time-of-flight delay
+	`define CCB_BX0_EMULATOR	01'h0		// Turns on bx0 emulator at power up, must be 0 for all CERN versions
 //---------------------------------------------------------------------------------------------------------------------------------------
 // Conditional compile flags: Enable only one CSC_TYPE
 //---------------------------------------------------------------------------------------------------------------------------------------
-	`define CSC_TYPE_A			04'hA		// Normal   CSC:  Normal chambers facing toward IR
+//	`define CSC_TYPE_A			04'hA		// Normal   CSC:  Normal chambers facing toward IR
 //	`define CSC_TYPE_B			04'hB		// Reversed CSC:  Normal chambers facing away from IR. All  hs = reversed
 //	`define CSC_TYPE_C			04'hC		// Normal   ME1B: ME1B   chambers facing toward IR.    ME1B hs =!reversed, ME1A hs = reversed
-//	`define CSC_TYPE_D			04'hD		// Reversed ME1B: ME1B   chambers facing away from IR. ME1B hs = reversed, ME1A hs =!reversed
+	`define CSC_TYPE_D			04'hD		// Reversed ME1B: ME1B   chambers facing away from IR. ME1B hs = reversed, ME1A hs =!reversed
 //---------------------------------------------------------------------------------------------------------------------------------------
 // Revision log
 //---------------------------------------------------------------------------------------------------------------------------------------
@@ -180,8 +181,39 @@
 //	01/07/10 Mod revcode to work for years 2010 and beyond
 //	01/08/10 Mod revcode again, it was causing vme_d to f5_mux
 //	01/11/10 Move bad bits check downstream of pattern injector
-//  01/13/10 Add 1bx high bad cfeb bit detection
+//	01/13/10 Add 1bx high bad cfeb bit detection
 //	01/14/10 Move bad bits check to triad_s1 in cfeb.v
+//	02/04/10 Reverse type b layers
+//	02/10/10 Reverse type b active feb flags
+//	02/10/10 Add event clear for clct vme diagnostic registers
+//	02/12/10 Blank non-triggering status bits for triggering events
+//	02/26/10 Add event clear for alct vme diagnostic registers
+//	02/26/10 Revert non-trigging blanking in tmb.v temporarily
+//	02/28/10 Fixed non-triggering status bits in tmb.v
+//	03/01/10 Changed tmb_allow_clct_ro default to 1
+//	03/04/10 Fix clct|alct duplication for case where first clct|alct is dummy in tmb.v
+//	03/05/10 Move hot channel + bad bits blocking ahead of raw hits ram, a big mistake, but poobah insists
+//	03/07/10 Add cfeb blocked bits to dmb readout
+//	03/19/10 Mod busy hs delimiters for me1a me1b cscs to separate cfeb4
+//	04/16/10 Fix tmb.v kill_clct logic for type C|D
+//	04/27/10 Replace x_library routines with ise 11 versions
+//	04/27/10 Add bx0 emulator to ccb.v add ttc_resync clears clock_lock_lost
+//	04/28/10 XST crash traced to x_delay srl address FF, removed FFs, it is an xst bug fixed in ise 11.5
+//	04/28/10 Add forced sync error for system test
+//	04/29/10 Revert x_delay to FF version, it is bigger yet somehow faster, add FF to bx0 emulator
+//	05/07/10 Load registers presets at power up instead of on 1st clock
+//	05/10/10 Add explict width to address parameter constants in vme.v
+//	05/12/10 Mod sequencer, clock, sync modules to fix sync_err always 1, add clock_lock lost to vme 0x120
+//	05/13/10 Mod ccb.v to clean up fmm ffs and remove resync from bx0 emulator
+//	05/14/10 Turn off bx0 emulator for CERN version
+//	06/24/10 Bugfix in tmb.v for multiple clcts in match window
+//	06/24/10 Add l1a window priority to read out only one event per l1a
+//	06/24/10 New miniscope channel assignments, turn on miniscope by default
+//	06/26/10 Reduce miniscope to 14 channels beco unpacker is weak, add stall flag to header
+//	06/30/10 Mod injector RAM for alct and l1a bits
+//	07/01/10 Add counter for events lost from readout due to L1A window prioritizing
+//	07/04/10 Set default l1a_win_pri_en=1
+//	07/07/10 Move cfeb injector msbs to l1a lookback register, revert to discrete ren, wen
 //---------------------------------------------------------------------------------------------------------------------------------------
 //	End TMB2005E Global Definitions
 //---------------------------------------------------------------------------------------------------------------------------------------

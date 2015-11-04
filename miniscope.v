@@ -8,6 +8,7 @@
 //------------------------------------------------------------------------------------------------------------------
 //	04/29/09 Initial
 //	04/30/09 Mod port names to match caller
+//	06/25/10 Add write address offset to look back from L1A time
 //------------------------------------------------------------------------------------------------------------------
 	module miniscope
 	(
@@ -16,7 +17,7 @@
 
 // DMB Readout FIFO RAM Ports
 	fifo_wen,
-	fifo_wadr,
+	fifo_wadr_mini,
 	fifo_radr_mini,
 	fifo_wdata_mini,
 	fifo_rdata_mini,
@@ -45,7 +46,7 @@
 
 // DMB Readout FIFO RAM Ports
 	input						fifo_wen;			// 1=Write enable FIFO RAM
-	input	[RAM_ADRB-1:0]		fifo_wadr;			// FIFO RAM write address
+	input	[RAM_ADRB-1:0]		fifo_wadr_mini;		// FIFO RAM write address
 	input	[RAM_ADRB-1:0]		fifo_radr_mini;		// FIFO RAM read address
 	input	[RAM_WIDTH*2-1:0]	fifo_wdata_mini;	// FIFO RAM write data
 	output	[RAM_WIDTH*2-1:0]	fifo_rdata_mini;	// FIFO RAM read  data
@@ -69,7 +70,7 @@
 	test_ff <= mini_tbins_test;
 	end
 
-	assign test_wdata[15:0] = {5'h00,fifo_wadr[10:0]};
+	assign test_wdata[15:0] = {5'h00,fifo_wadr_mini[10:0]};
 
 	assign fifo_wdata[0] = (test_ff) ? test_wdata[7:0]  : fifo_wdata_mini[7:0];
 	assign fifo_wdata[1] = (test_ff) ? test_wdata[15:8] : fifo_wdata_mini[15:8];
@@ -100,7 +101,7 @@
 	.ENA			(1'b1),						// Port A RAM Enable Input
 	.SSRA			(1'b0),						// Port A Synchronous Set/Reset Input
 	.CLKA			(clock),					// Port A Clock
-	.ADDRA			(fifo_wadr),				// Port A 11-bit Address Input
+	.ADDRA			(fifo_wadr_mini),			// Port A 11-bit Address Input
 	.DIA			(fifo_wdata[i]),			// Port A 8-bit Data Input
 	.DIPA			(parity_wr[i]),				// Port A 1-bit parity Input
 	.DOA			(),							// Port A 8-bit Data Output

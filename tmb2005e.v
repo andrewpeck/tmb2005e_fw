@@ -285,6 +285,10 @@
 //	09/08/09 Add phaser autostart
 //	09/09/09 Remove bx0 mez test points
 //	09/14/09 Add sync err control module
+//	04/27/10 Add bx0 emulator to ccb.v add ttc_resync clears clock_lock_lost
+//	05/10/10 Change vme instantiation to use defparams for firmware version constants
+//	06/26/10 Add miniscope write address offset
+//	06/30/10 Mod injector RAM for alct and l1a bits
 //-------------------------------------------------------------------------------------------------------------------
 //	Port Declarations
 //-------------------------------------------------------------------------------------------------------------------
@@ -442,7 +446,6 @@
 	parameter MXTHROTTLE	=	8;				// Number bits needed for throttle counte	parameter MXBXN			=	12;				// Number BXN bits, LHC bunchs numbered 0 to 3563
 	parameter MXEXTDLY		=	4;				// Number CLCT external trigger delay counter bits
 
-	parameter MXL1A			=	4;				// Number L1A counter bits
 	parameter MXL1DELAY		=	8;				// NUmber L1Acc delay counter bits
 	parameter MXL1WIND		=	4;				// Number L1Acc window width bits
 
@@ -669,9 +672,9 @@
 	.clock_cfeb4_rxd		(clock_cfeb_rxd[4]),		// Out	40MHz CFEB receive  data clock 1x
 
 // Global reset
-	.clock_lock_lost		(clock_lock_lost),			// Out	40MHz main clock lost lock FF
-	.global_reset			(global_reset),				// Out	Global reset
 	.global_reset_en		(global_reset_en),			// In	Enable global reset on lock_lost
+	.global_reset			(global_reset),				// Out	Global reset
+	.clock_lock_lost_err	(clock_lock_lost_err),		// Out	40MHz main clock lost lock
 
 // Clock DCM lock status
 	.lock_tmb_clock0		(lock_tmb_clock0),			// Out	DCM lock status
@@ -773,9 +776,10 @@
 	wire	[7:0]	l1a_delay_vme;
 	wire	[7:0]	vme_ccb_cmd;
 	wire	[2:0]	fmm_state;
-	wire	[7:0]	ccb_ttcrx_lost_cnt;
-	wire	[7:0]	ccb_qpll_lost_cnt;
+	wire	[7:0]			ccb_ttcrx_lost_cnt;
+	wire	[7:0]			ccb_qpll_lost_cnt;
 	wire	[MXMPCRX-1:0]	_mpc_rx;					// Received by ccb GTL chip, passed to TMB section
+	wire	[MXBXN-1:0]		lhc_cycle;
 
 // CCB Local
 	wire	alct_vpf_tp;
@@ -807,6 +811,7 @@
 	.clct_status_en			(clct_status_en),			// In	1=Enable status GTL outputs for clct
 	.gtl_loop_lcl			(gtl_loop_lcl),				// In	1=Enable gtl loop mode
 	.ccb_status_oe_lcl		(ccb_status_oe_lcl),		// In	1=Enable status GTL outputs
+	.lhc_cycle				(lhc_cycle[MXBXN-1:0]),		// In	LHC period, max BXN count+1
 
 // TMB signals transmitted to CCB
 	.clct_status			(clct_status[8:0]),			// In	CLCT status for CCB front panel (VME sets status_oe)
@@ -862,8 +867,11 @@
 	.alct_ext_trig_vme		(alct_ext_trig_vme),		// In	1=Fire alct_ext_trig oneshot
 	.clct_ext_trig_vme		(clct_ext_trig_vme),		// In	1=Fire clct_ext_trig oneshot
 	.ext_trig_both			(ext_trig_both),			// In	1=clct_ext_trig fires alct and alct fires clct_trig, DC level
-	.l1accept_vme			(l1accept_vme),				// In	1=fire ccb_l1accept oneshot
+	.l1a_vme				(l1a_vme),					// In	1=fire ccb_l1accept oneshot
 	.l1a_delay_vme			(l1a_delay_vme[7:0]),		// In	Internal L1A delay
+	.l1a_inj_ram			(l1a_inj_ram),				// In	L1A injector RAM pulse
+	.l1a_inj_ram_en			(l1a_inj_ram_en),			// In	L1A injector RAM enable
+	.inj_ramout_busy		(inj_ramout_busy),			// In	Injector RAM busy
 
 // TTC Decoded Commands
 	.ttc_bx0				(ttc_bx0),					// Out	Bunch crossing zero
@@ -882,6 +890,7 @@
 	.vme_evcntres			(vme_evcntres),				// In	Event counter reset, from VME
 	.vme_bcntres			(vme_bcntres),				// In	Bunch crossing counter reset, from VME
 	.vme_bx0				(vme_bx0),					// In	Bunch crossing zero, from VME
+	.vme_bx0_emu_en			(vme_bx0_emu_en),			// In	BX0 emulator enable
 	.fmm_state				(fmm_state[2:0]),			// Out	FMM machine state
 
 //	CCB TTC lock status
@@ -994,6 +1003,7 @@
 	wire	[MXCNTVME-1:0]	event_counter60;
 	wire	[MXCNTVME-1:0]	event_counter61;
 	wire	[MXCNTVME-1:0]	event_counter62;
+	wire	[MXCNTVME-1:0]	event_counter63;
 
 // ALCT Structure Error Counters
 	wire	[7:0]			alct_err_counter0;			// Error counter 1D remap
@@ -1002,6 +1012,26 @@
 	wire	[7:0]			alct_err_counter3;
 	wire	[7:0]			alct_err_counter4;
 	wire	[7:0]			alct_err_counter5;
+
+// CFEB injector RAM map 2D arrays into 1D for ALCT
+	wire	[MXCFEB-1:0]	inj_ramout_pulse;
+	assign inj_ramout_busy=|inj_ramout_pulse;
+
+	wire	[5:0]			inj_ramout [MXCFEB-1:0];
+	wire	[29:0]			inj_ramout_mux;
+
+	assign inj_ramout_mux[5:0]   = inj_ramout[0][5:0];
+	assign inj_ramout_mux[11:6]  = inj_ramout[1][5:0];
+	assign inj_ramout_mux[17:12] = inj_ramout[2][5:0];
+	assign inj_ramout_mux[23:18] = inj_ramout[3][5:0];
+	assign inj_ramout_mux[29:24] = inj_ramout[4][5:0];
+
+// ALCT Injectors
+	wire	[10:0]			alct0_inj_ram = inj_ramout_mux[10:0];	// Injector RAM ALCT0
+	wire	[10:0]			alct1_inj_ram = inj_ramout_mux[21:11];	// Injector RAM ALCT1
+	wire	[4:0]			alctb_inj_ram = inj_ramout_mux[26:22];	// Injector RAM ALCT bxn
+	assign					l1a_inj_ram   = inj_ramout_mux[27];		// Injector RAM L1A
+	wire					inj_ram_sump  =|inj_ramout_mux[29:28]; 	// Injector RAM unused
 
 	wire alct_ext_inject = alct_ext_trig;				// CCB failed to implement this signal
 
@@ -1064,6 +1094,7 @@
 	.alct_txd_int_delay		(alct_txd_int_delay[3:0]),		// In	ALCT data transmit delay, integer bx
 	.alct_clock_en_vme		(alct_clock_en_vme),			// In	Enable ALCT 40MHz clock
 	.alct_seq_cmd			(alct_seq_cmd[3:0]),			// In	ALCT Sequencer command
+	.event_clear_vme		(event_clear_vme),				// In	Event clear for aff,alct,clct,mpc vme diagnostic registers
 	.alct0_vme				(alct0_vme[15:0]),				// Out	LCT latched last valid pattern
 	.alct1_vme				(alct1_vme[15:0]),				// Out	LCT latched last valid pattern
 	.bxn_alct_vme			(bxn_alct_vme),					// Out	ALCT bxn on last alct valid pattern flag
@@ -1102,9 +1133,14 @@
 	.cfg_alct_ext_inject	(cfg_alct_ext_inject),			// In	1=Assert alct_ext_inject
 	.alct_clear				(alct_clear),					// In	1=Blank alct_rx inputs
 	.alct_inject			(alct_inject),					// In	1=Start ALCT injector
+	.alct_inj_ram_en		(alct_inj_ram_en),				// In	1=Link  ALCT injector to CFEB injector RAM
 	.alct_inj_delay			(alct_inj_delay[4:0]),			// In	ALCT Injector delay	
 	.alct0_inj				(alct0_inj[15:0]),				// In	ALCT0 to inject				
 	.alct1_inj				(alct1_inj[15:0]),				// In	ALCT1 to inject
+	.alct0_inj_ram			(alct0_inj_ram[10:0]),			// In	Injector RAM ALCT0
+	.alct1_inj_ram			(alct1_inj_ram[10:0]),			// In	Injector RAM ALCT1
+	.alctb_inj_ram			(alctb_inj_ram[4:0]),			// In	Injector RAM ALCT bxn
+	.inj_ramout_busy		(inj_ramout_busy),				// In	Injector RAM busy
 
 // Trigger/Readout Counter Ports
 	.cnt_all_reset			(cnt_all_reset),				// In	Trigger/Readout counter reset
@@ -1183,7 +1219,7 @@
 	wire	[11:0]			inj_last_tbin;
 	wire	[2:0]			inj_wen;
 	wire	[9:0]			inj_rwadr;
-	wire	[15:0]			inj_wdata;
+	wire	[17:0]			inj_wdata;
 	wire	[2:0]			inj_ren;
 
 // Raw Hits FIFO RAM Ports
@@ -1206,6 +1242,7 @@
 	wire	[MXCFEB-1:0]	cfeb_badbits_block;				// Allow bad bits to block triads
 	wire	[MXCFEB-1:0]	cfeb_badbits_found;				// CFEB[n] has at least 1 bad bit
 	wire	[15:0]			cfeb_badbits_nbx;				// Cycles a bad bit must be continuously high
+	wire	[MXDS*MXLY-1:0]	cfeb_blockedbits[MXCFEB-1:0];	// 1=CFEB rx bit blocked by hcm or went bad, packed
 
 	wire	[MXDS-1:0]		cfeb_ly0_badbits[MXCFEB-1:0];	// 1=CFEB rx bit went bad
 	wire	[MXDS-1:0]		cfeb_ly1_badbits[MXCFEB-1:0];	// 1=CFEB rx bit went bad
@@ -1235,17 +1272,17 @@
 	wire	[MXCFEB-1:0]	cfeb_sump;
 
 // CFEB Injector data out multiplexler
-	wire [15:0]	inj_rdata [MXCFEB-1:0];
-	reg	 [15:0] inj_rdata_mux;
+	wire [17:0]	inj_rdata [MXCFEB-1:0];
+	reg	 [17:0] inj_rdata_mux;
 
 	always @(inj_febsel or inj_rdata[0][0]) begin
 	case (inj_febsel[4:0])
-	5'b00001:	inj_rdata_mux = inj_rdata[0][15:0];
-	5'b00010:	inj_rdata_mux = inj_rdata[1][15:0];
-	5'b00100:	inj_rdata_mux = inj_rdata[2][15:0];
-	5'b01000:	inj_rdata_mux = inj_rdata[3][15:0];
-	5'b10000:	inj_rdata_mux = inj_rdata[4][15:0];
-	default		inj_rdata_mux = inj_rdata[0][15:0];
+	5'b00001:	inj_rdata_mux = inj_rdata[0][17:0];
+	5'b00010:	inj_rdata_mux = inj_rdata[1][17:0];
+	5'b00100:	inj_rdata_mux = inj_rdata[2][17:0];
+	5'b01000:	inj_rdata_mux = inj_rdata[3][17:0];
+	5'b10000:	inj_rdata_mux = inj_rdata[4][17:0];
+	default		inj_rdata_mux = inj_rdata[0][17:0];
 	endcase
 	end
 
@@ -1280,9 +1317,11 @@
 	.inj_last_tbin		(inj_last_tbin[11:0]),				// In	Last tbin, may wrap past 1024 ram adr
 	.inj_wen			(inj_wen[2:0]),						// In	1=Write enable injector RAM
 	.inj_rwadr			(inj_rwadr[9:0]),					// In	Injector RAM read/write address
-	.inj_wdata			(inj_wdata[15:0]),					// In	Injector RAM write data
+	.inj_wdata			(inj_wdata[17:0]),					// In	Injector RAM write data
 	.inj_ren			(inj_ren[2:0]),						// In	1=Read enable Injector RAM
-	.inj_rdata			(inj_rdata[icfeb][15:0]),			// Out	Injector RAM read data
+	.inj_rdata			(inj_rdata[icfeb][17:0]),			// Out	Injector RAM read data
+	.inj_ramout			(inj_ramout[icfeb][5:0]),			// Out	Injector RAM read data for ALCT and L1A
+	.inj_ramout_pulse	(inj_ramout_pulse[icfeb]),			// Out	Injector RAM is injecting
 
 // Raw Hits FIFO RAM Ports
 	.fifo_wen			(fifo_wen),							// In	1=Write enable FIFO RAM
@@ -1304,12 +1343,14 @@
 	.cfeb_badbits_block	(cfeb_badbits_block[icfeb]),		// In	Allow bad bits to block triads
 	.cfeb_badbits_nbx	(cfeb_badbits_nbx[15:0]),			// In	Cycles a bad bit must be continuously high
 	.cfeb_badbits_found	(cfeb_badbits_found[icfeb]),		// Out	CFEB[n] has at least 1 bad bit
-	.ly0_badbits		(cfeb_ly0_badbits[icfeb][MXDS-1:0]),// Out	1=CFEB rx bit went bad
-	.ly1_badbits		(cfeb_ly1_badbits[icfeb][MXDS-1:0]),// Out	1=CFEB rx bit went bad
-	.ly2_badbits		(cfeb_ly2_badbits[icfeb][MXDS-1:0]),// Out	1=CFEB rx bit went bad
-	.ly3_badbits		(cfeb_ly3_badbits[icfeb][MXDS-1:0]),// Out	1=CFEB rx bit went bad
-	.ly4_badbits		(cfeb_ly4_badbits[icfeb][MXDS-1:0]),// Out	1=CFEB rx bit went bad
-	.ly5_badbits		(cfeb_ly5_badbits[icfeb][MXDS-1:0]),// Out	1=CFEB rx bit went bad
+	.cfeb_blockedbits	(cfeb_blockedbits[icfeb]),			// Out	1=CFEB rx bit blocked by hcm or went bad, packed
+
+	.ly0_badbits		(cfeb_ly0_badbits[icfeb][MXDS-1:0]),		// Out	1=CFEB rx bit went bad
+	.ly1_badbits		(cfeb_ly1_badbits[icfeb][MXDS-1:0]),		// Out	1=CFEB rx bit went bad
+	.ly2_badbits		(cfeb_ly2_badbits[icfeb][MXDS-1:0]),		// Out	1=CFEB rx bit went bad
+	.ly3_badbits		(cfeb_ly3_badbits[icfeb][MXDS-1:0]),		// Out	1=CFEB rx bit went bad
+	.ly4_badbits		(cfeb_ly4_badbits[icfeb][MXDS-1:0]),		// Out	1=CFEB rx bit went bad
+	.ly5_badbits		(cfeb_ly5_badbits[icfeb][MXDS-1:0]),		// Out	1=CFEB rx bit went bad
 
 // Triad Decoder Ports
 	.triad_persist		(triad_persist[3:0]),				// In	Triad 1/2-strip persistence
@@ -1491,8 +1532,7 @@
 
 	wire	[MXBXN-1:0]		bxn_offset_pretrig;
 	wire	[MXBXN-1:0]		bxn_offset_l1a;
-	wire	[MXBXN-1:0]		lhc_cycle;
-	wire	[MXL1A-1:0]		l1a_offset;
+	wire	[MXL1ARX-1:0]	l1a_offset;
 	wire	[MXDRIFT-1:0]	drift_delay;
 	wire	[MXHITB-1:0]	hit_thresh_postdrift;
 	wire	[MXPIDB-1:0]	pid_thresh_postdrift;
@@ -1614,6 +1654,13 @@
 	wire	[RAM_WIDTH*2-1:0]	mini_rdata;			// FIFO dump miniscope
 	wire	[RAM_WIDTH*2-1:0]	fifo_wdata_mini;	// FIFO RAM write data
 	wire	[RAM_ADRB-1:0]		rd_mini_offset;		// RAM address rd_fifo_adr offset for miniscope read out
+	wire	[RAM_ADRB-1:0]		wr_mini_offset;		// RAM address offset for miniscope write
+
+// Blockedbits
+	wire	[MXCFEB-1:0]	rd_list_bcb;			// List of CFEBs to read out
+	wire	[MXCFEBB-1:0]	rd_ncfebs_bcb;			// Number of CFEBs in bcb_list (0 to 5)
+	wire	[11:0]			bcb_blkbits;			// CFEB blocked bits frame data
+	wire	[MXCFEBB-1:0]	bcb_cfeb_adr;			// CFEB ID	
 
 // Header Counters
 	wire	[MXCNTVME-1:0]	pretrig_counter;		// Pre-trigger counter
@@ -1644,7 +1691,7 @@
 // CCB
 	.clock					(clock),						// In	40MHz TMB main clock
 	.global_reset			(global_reset),					// In	Global reset
-	.clock_lock_lost		(clock_lock_lost),				// In	40MHz main clock lost lock FF
+	.clock_lock_lost_err	(clock_lock_lost_err),			// In	40MHz main clock lost lock FF
 	.ccb_l1accept			(ccb_l1accept),					// In	Level 1 Accept
 	.ccb_evcntres			(ccb_evcntres),					// In	Event counter (L1A) reset command
 	.ttc_bx0				(ttc_bx0),						// In	Bunch crossing 0 flag
@@ -1755,7 +1802,7 @@
 	.bxn_offset_pretrig		(bxn_offset_pretrig[MXBXN-1:0]),	// In	BXN offset at reset, for pretrig bxn
 	.bxn_offset_l1a			(bxn_offset_l1a[MXBXN-1:0]),		// In	BXN offset at reset, for L1A bxn
 	.lhc_cycle				(lhc_cycle[MXBXN-1:0]),				// In	LHC period, max BXN count+1
-	.l1a_offset				(l1a_offset[MXL1A-1:0]),			// In	L1A counter preset value
+	.l1a_offset				(l1a_offset[MXL1ARX-1:0]),			// In	L1A counter preset value
 	.drift_delay			(drift_delay[MXDRIFT-1:0]),			// In	CSC Drift delay clocks
 	.triad_persist			(triad_persist[3:0]),				// In	Triad 1/2-strip persistence
 
@@ -1796,6 +1843,7 @@
 	.l1a_internal			(l1a_internal),						// In	Generate internal Level 1, overrides external
 	.l1a_internal_dly		(l1a_internal_dly[MXL1WIND-1:0]),	// In	 Delay internal l1a to shift position in l1a match windwow
 	.l1a_window				(l1a_window[MXL1WIND-1:0]),			// In	Level1 Accept window width after delay
+	.l1a_win_pri_en			(l1a_win_pri_en),					// In	Enable L1A window priority
 	.l1a_lookback			(l1a_lookback[MXBADR-1:0]),			// In	Bxn to look back from l1a wr_buf_adr
 
 	.l1a_allow_match		(l1a_allow_match),					// In	Readout allows tmb trig pulse in L1A window (normal mode)
@@ -1809,6 +1857,8 @@
 
 	.seq_trigger			(seq_trigger),						// Out	Sequencer requests L1A from CCB
 	.sequencer_state		(sequencer_state[11:0]),			// Out	Sequencer state for vme
+
+	.event_clear_vme		(event_clear_vme),					// In	Event clear for aff,clct,mpc vme diagnostic registers
 	.clct0_vme				(clct0_vme[MXCLCT-1:0]),			// Out	First  CLCT
 	.clct1_vme				(clct1_vme[MXCLCT-1:0]),			// Out	Second CLCT
 	.clctc_vme				(clctc_vme[MXCLCTC-1:0]),			// Out	Common to CLCT0/1 to TMB
@@ -1867,7 +1917,8 @@
 	.buf_q_ovf_err			(buf_q_ovf_err),					// In	Tried to push when stack full
 	.buf_q_udf_err			(buf_q_udf_err),					// In	Tried to pop when stack empty
 	.buf_q_adr_err			(buf_q_adr_err),					// In	Fence adr popped from stack doesnt match rls adr
-	.buf_stalled			(buf_stalled),						// In	Buffer write pointer hit a fence and stalled
+	.buf_stalled			(buf_stalled),						// In	Buffer write pointer hit a fence and is stalled now
+	.buf_stalled_once		(buf_stalled_once),					// In	Buffer stalled at least once since last resync
 	.buf_fence_dist			(buf_fence_dist[MXBADR-1:0]),		// In	Current distance to next fence 0 to 2047
 	.buf_fence_cnt			(buf_fence_cnt[MXBADR-1+1:0]),		// In	Number of fences in fence RAM currently
 	.buf_fence_cnt_peak		(buf_fence_cnt_peak[MXBADR-1+1:0]),	// In	Peak number of fences in fence RAM
@@ -1879,6 +1930,12 @@
 	.rd_list_cfeb			(rd_list_cfeb[MXCFEB-1:0]),		// Out	List of CFEBs to read out
 	.rd_ncfebs				(rd_ncfebs[MXCFEBB-1:0]),		// Out	Number of CFEBs in feb_list (4 or 5 depending on CSC type)
 	.rd_fifo_adr			(rd_fifo_adr[RAM_ADRB-1:0]),	// Out	RAM address at pre-trig, must be valid 1bx before rd_start
+
+// CFEB Blockedbits Readout Control
+	.rd_start_bcb			(rd_start_bcb),					// Out	Start readout sequence
+	.rd_abort_bcb			(rd_abort_bcb),					// Out	Cancel readout
+	.rd_list_bcb			(rd_list_bcb[MXCFEB-1:0]),		// Out	List of CFEBs to read out
+	.rd_ncfebs_bcb			(rd_ncfebs_bcb[MXCFEBB-1:0]),	// Out	Number of CFEBs in bcb_list (0 to 5)
 
 // RPC Sequencer Readout Control
 	.rd_start_rpc			(rd_start_rpc),					// Out	Start readout sequence
@@ -1895,6 +1952,14 @@
 	.cfeb_tbin				(cfeb_tbin[MXTBIN-1:0]),		// In	FIFO dump Time Bin #
 	.cfeb_rawhits			(cfeb_rawhits[7:0]),			// In	Layer data from FIFO
 	.cfeb_fifo_busy			(cfeb_fifo_busy),				// In	Readout busy sending data to sequencer, goes down 1bx
+
+// CFEB Blockedbits Frame
+	.bcb_read_enable		(bcb_read_enable),				// In	Enable blocked bits in readout
+	.bcb_first_frame		(bcb_first_frame),				// In	First frame valid 2bx after rd_start
+	.bcb_last_frame			(bcb_last_frame),				// In	Last frame valid 1bx after busy goes down
+	.bcb_blkbits			(bcb_blkbits[11:0]),			// In	CFEB blocked bits frame data
+	.bcb_cfeb_adr			(bcb_cfeb_adr[MXCFEBB-1:0]),	// In	CFEB ID	
+	.bcb_fifo_busy			(bcb_fifo_busy),				// In	Readout busy sending data to sequencer, goes down 1bx early
 
 // RPC Sequencer Frame
 	.rpc_first_frame		(rpc_first_frame),				// In	First frame valid 2bx after rd_start
@@ -2024,6 +2089,7 @@
 	.mini_last_frame		(mini_last_frame),					// In	Last frame valid 1bx after busy goes down
 	.mini_rdata				(mini_rdata[RAM_WIDTH*2-1:0]),		// In	FIFO dump miniscope
 	.fifo_wdata_mini		(fifo_wdata_mini[RAM_WIDTH*2-1:0]),	// Out	Miniscope FIFO RAM write data
+	.wr_mini_offset			(wr_mini_offset[RAM_ADRB-1:0]),		// Out	RAM address offset for miniscope write
 
 // Mini Sequencer Readout Control
 	.rd_start_mini			(rd_start_mini),					// Out	Start readout sequence
@@ -2087,6 +2153,7 @@
 	.event_counter60		(event_counter60[MXCNTVME-1:0]),	// Out
 	.event_counter61		(event_counter61[MXCNTVME-1:0]),	// Out
 	.event_counter62		(event_counter62[MXCNTVME-1:0]),	// Out
+	.event_counter63		(event_counter63[MXCNTVME-1:0]),	// Out
 
 // Header Counters
 	.hdr_clear_on_resync	(hdr_clear_on_resync),				// In	Clear header counters on ttc_resync
@@ -2234,9 +2301,12 @@
 //-------------------------------------------------------------------------------------------------------------------
 //	Miniscope Instantiation
 //-------------------------------------------------------------------------------------------------------------------
+	wire	[RAM_ADRB-1:0]		fifo_wadr_mini;					// FIFO RAM write tbin address
 	wire	[RAM_ADRB-1:0]		fifo_radr_mini;					// FIFO RAM read tbin address
 	wire	[RAM_WIDTH*2-1:0]	fifo_rdata_mini;				// FIFO RAM read data
 	wire	[1:0]				parity_err_mini;				// Miniscope RAM parity error detected
+
+	assign fifo_wadr_mini = fifo_wadr-wr_mini_offset;			// FIFO RAM read tbin address
 
 	miniscope uminiscope
 	(
@@ -2245,7 +2315,7 @@
 
 // Raw Hits FIFO RAM Ports
 	.fifo_wen				(fifo_wen),							// In	1=Write enable FIFO RAM
-	.fifo_wadr				(fifo_wadr[RAM_ADRB-1:0]),			// In	FIFO RAM write address
+	.fifo_wadr_mini			(fifo_wadr_mini[RAM_ADRB-1:0]),		// In	FIFO RAM write address
 	.fifo_radr_mini			(fifo_radr_mini[RAM_ADRB-1:0]),		// In	FIFO RAM read address
 	.fifo_wdata_mini		(fifo_wdata_mini[RAM_WIDTH*2-1:0]),	// In	FIFO RAM write data
 	.fifo_rdata_mini		(fifo_rdata_mini[RAM_WIDTH*2-1:0]),	// Out	FIFO RAM read data
@@ -2301,12 +2371,13 @@
 	.buf_q_ovf_err		(buf_q_ovf_err),					// Out	Tried to push when stack full
 	.buf_q_udf_err		(buf_q_udf_err),					// Out	Tried to pop when stack empty
 	.buf_q_adr_err		(buf_q_adr_err),					// Out	Fence adr popped from stack doesnt match rls adr
-	.buf_stalled		(buf_stalled),						// Out	Buffer write pointer hit a fence and stalled
+	.buf_stalled		(buf_stalled),						// Out	Buffer write pointer hit a fence and is stalled now
+	.buf_stalled_once	(buf_stalled_once),					// Out	Buffer stalled at least once since last resync
 	.buf_fence_dist		(buf_fence_dist[MXBADR-1:0]),		// Out	Current distance to next fence 0 to 2047
 	.buf_fence_cnt		(buf_fence_cnt[MXBADR-1+1:0]),		// Out	Number of fences in fence RAM currently
 	.buf_fence_cnt_peak	(buf_fence_cnt_peak[MXBADR-1+1:0]),	// Out	Peak number of fences in fence RAM
 	.buf_display		(buf_display[7:0]),					// Out	Buffer fraction in use display
-	.sump				(buf_sump) 							// Out	Unused signals
+	.buf_sump			(buf_sump) 							// Out	Unused signals
 	);
 
 //-------------------------------------------------------------------------------------------------------------------
@@ -2329,12 +2400,19 @@
 // Miniscpe FIFO RAM Ports
 	.fifo_radr_mini		(fifo_radr_mini[RAM_ADRB-1:0]),		// Out	FIFO RAM read address
 
-// CLCT Raw Hits Data Ports
+// CFEB Raw Hits Data Ports
 	.fifo0_rdata_cfeb	(fifo_rdata[0][RAM_WIDTH-1:0]),		// In	FIFO RAM read data
 	.fifo1_rdata_cfeb	(fifo_rdata[1][RAM_WIDTH-1:0]),		// In	FIFO RAM read data
 	.fifo2_rdata_cfeb	(fifo_rdata[2][RAM_WIDTH-1:0]),		// In	FIFO RAM read data
 	.fifo3_rdata_cfeb	(fifo_rdata[3][RAM_WIDTH-1:0]),		// In	FIFO RAM read data
 	.fifo4_rdata_cfeb	(fifo_rdata[4][RAM_WIDTH-1:0]),		// In	FIFO RAM read data
+
+// CFEB Blockedbits Data Ports
+	.cfeb0_blockedbits		(cfeb_blockedbits[0]),			// In	1=CFEB rx bit blocked by hcm or went bad, packed
+	.cfeb1_blockedbits		(cfeb_blockedbits[1]),			// In	1=CFEB rx bit blocked by hcm or went bad, packed
+	.cfeb2_blockedbits		(cfeb_blockedbits[2]),			// In	1=CFEB rx bit blocked by hcm or went bad, packed
+	.cfeb3_blockedbits		(cfeb_blockedbits[3]),			// In	1=CFEB rx bit blocked by hcm or went bad, packed
+	.cfeb4_blockedbits		(cfeb_blockedbits[4]),			// In	1=CFEB rx bit blocked by hcm or went bad, packed
 
 // RPC Raw hits Data Ports
 	.fifo0_rdata_rpc	(fifo0_rdata_rpc[RAM_WIDTH-1+4:0]),	// In	FIFO RAM read data, rpc
@@ -2363,6 +2441,12 @@
 	.rd_ncfebs			(rd_ncfebs[MXCFEBB-1:0]),			// In	Number of CFEBs in feb_list (4 or 5 depending on CSC type)
 	.rd_fifo_adr		(rd_fifo_adr[RAM_ADRB-1:0]),		// In	RAM address at pre-trig, must be valid 1bx before rd_start
 
+// CFEB Blockedbits Readout Control
+	.rd_start_bcb		(rd_start_bcb),						// In	Start readout sequence
+	.rd_abort_bcb		(rd_abort_bcb),						// In	Cancel readout
+	.rd_list_bcb		(rd_list_bcb[MXCFEB-1:0]),			// In	List of CFEBs to read out
+	.rd_ncfebs_bcb		(rd_ncfebs_bcb[MXCFEBB-1:0]),		// In	Number of CFEBs in bcb_list (0 to 5)
+
 // RPC Sequencer Readout Control
 	.rd_start_rpc		(rd_start_rpc),						// In	Start readout sequence
 	.rd_abort_rpc		(rd_abort_rpc),						// In	Cancel readout
@@ -2376,26 +2460,33 @@
 	.rd_mini_offset		(rd_mini_offset[RAM_ADRB-1:0]),		// In	RAM address rd_fifo_adr offset for miniscope read out
 
 // CFEB Sequencer Frame Output
-	.cfeb_first_frame	(cfeb_first_frame),				// Out	First frame valid 2bx after rd_start
-	.cfeb_last_frame	(cfeb_last_frame),				// Out	Last frame valid 1bx after busy goes down
-	.cfeb_adr			(cfeb_adr[MXCFEBB-1:0]),		// Out	FIFO dump CFEB ID
-	.cfeb_tbin			(cfeb_tbin[MXTBIN-1:0]),		// Out	FIFO dump Time Bin #
-	.cfeb_rawhits		(cfeb_rawhits[7:0]),			// Out	Layer data from FIFO
-	.cfeb_fifo_busy		(cfeb_fifo_busy),				// Out	Readout busy sending data to sequencer, goes down 1bx early
+	.cfeb_first_frame	(cfeb_first_frame),					// Out	First frame valid 2bx after rd_start
+	.cfeb_last_frame	(cfeb_last_frame),					// Out	Last frame valid 1bx after busy goes down
+	.cfeb_adr			(cfeb_adr[MXCFEBB-1:0]),			// Out	FIFO dump CFEB ID
+	.cfeb_tbin			(cfeb_tbin[MXTBIN-1:0]),			// Out	FIFO dump Time Bin #
+	.cfeb_rawhits		(cfeb_rawhits[7:0]),				// Out	Layer data from FIFO
+	.cfeb_fifo_busy		(cfeb_fifo_busy),					// Out	Readout busy sending data to sequencer, goes down 1bx early
+
+// CFEB Blockedbits Frame Output
+	.bcb_first_frame	(bcb_first_frame),					// Out	First frame valid 2bx after rd_start
+	.bcb_last_frame		(bcb_last_frame),					// Out	Last frame valid 1bx after busy goes down
+	.bcb_blkbits		(bcb_blkbits[11:0]),				// Out	CFEB blocked bits frame data
+	.bcb_cfeb_adr		(bcb_cfeb_adr[MXCFEBB-1:0]),		// Out	CFEB ID	
+	.bcb_fifo_busy		(bcb_fifo_busy),					// Out	Readout busy sending data to sequencer, goes down 1bx early
 
 // RPC Sequencer Frame Output
-	.rpc_first_frame	(rpc_first_frame),				// Out	First frame valid 2bx after rd_start
-	.rpc_last_frame		(rpc_last_frame),				// Out	Last frame valid 1bx after busy goes down
-	.rpc_adr			(rpc_adr[MXRPCB-1:0]),			// Out	FIFO dump RPC ID
-	.rpc_tbinbxn		(rpc_tbinbxn[MXTBIN-1:0]),		// Out	FIFO dump RPC tbin or bxn for DMB
-	.rpc_rawhits		(rpc_rawhits[7:0]),				// Out	FIFO dump RPC pad hits, 8 of 16 per cycle
-	.rpc_fifo_busy		(rpc_fifo_busy),				// Out	Readout busy sending data to sequencer, goes down 1bx early
+	.rpc_first_frame	(rpc_first_frame),					// Out	First frame valid 2bx after rd_start
+	.rpc_last_frame		(rpc_last_frame),					// Out	Last frame valid 1bx after busy goes down
+	.rpc_adr			(rpc_adr[MXRPCB-1:0]),				// Out	FIFO dump RPC ID
+	.rpc_tbinbxn		(rpc_tbinbxn[MXTBIN-1:0]),			// Out	FIFO dump RPC tbin or bxn for DMB
+	.rpc_rawhits		(rpc_rawhits[7:0]),					// Out	FIFO dump RPC pad hits, 8 of 16 per cycle
+	.rpc_fifo_busy		(rpc_fifo_busy),					// Out	Readout busy sending data to sequencer, goes down 1bx early
 
 // Mini Sequencer Frame Output
-	.mini_first_frame	(mini_first_frame),				// Out	First frame valid 2bx after rd_start
-	.mini_last_frame	(mini_last_frame),				// Out	Last frame valid 1bx after busy goes down
-	.mini_rdata			(mini_rdata[RAM_WIDTH*2-1:0]),	// Out	FIFO dump miniscope
-	.mini_fifo_busy		(mini_fifo_busy)				// Out	Readout busy sending data to sequencer, goes down 1bx early
+	.mini_first_frame	(mini_first_frame),					// Out	First frame valid 2bx after rd_start
+	.mini_last_frame	(mini_last_frame),					// Out	Last frame valid 1bx after busy goes down
+	.mini_rdata			(mini_rdata[RAM_WIDTH*2-1:0]),		// Out	FIFO dump miniscope
+	.mini_fifo_busy		(mini_fifo_busy)					// Out	Readout busy sending data to sequencer, goes down 1bx early
 	);
 
 //-------------------------------------------------------------------------------------------------------------------
@@ -2572,6 +2663,7 @@
 	.sync_err_blanks_mpc(sync_err_blanks_mpc),			// In	Sync error blanks LCTs to MPC
 
 // VME Status
+	.event_clear_vme	(event_clear_vme),				// In	Event clear for aff,clct,mpc vme diagnostic registers
 	.mpc0_frame0_vme	(mpc0_frame0_vme[MXFRAME-1:0]),	// Out	MPC best muon 1st frame
 	.mpc0_frame1_vme	(mpc0_frame1_vme[MXFRAME-1:0]),	// Out	MPC best buon 2nd frame
 	.mpc1_frame0_vme	(mpc1_frame0_vme[MXFRAME-1:0]),	// Out	MPC second best muon 1st frame
@@ -2671,25 +2763,28 @@
 	.alct_ecc_rx_err			(alct_ecc_rx_err),				// In	ALCT uncorrected ECC error in data ALCT received from TMB
 	.alct_ecc_tx_err			(alct_ecc_tx_err),				// In	ALCT uncorrected ECC error in data ALCT transmitted to TMB
 	.bx0_match_err				(!bx0_match),					// In	ALCT alct_bx0 != clct_bx0
+	.clock_lock_lost_err		(clock_lock_lost_err),			// In	40MHz main clock lost lock
 
 // Sync error source enables
 	.clct_bx0_sync_err_en		(clct_bx0_sync_err_en),			// In	TMB  clock pulse count err bxn!=0+offset at ttc_bx0 arrival
 	.alct_ecc_rx_err_en			(alct_ecc_rx_err_en),			// In	ALCT uncorrected ECC error in data ALCT received from TMB
 	.alct_ecc_tx_err_en			(alct_ecc_tx_err_en),			// In	ALCT uncorrected ECC error in data ALCT transmitted to TMB
 	.bx0_match_err_en			(bx0_match_err_en),				// In	ALCT alct_bx0 != clct_bx0
+	.clock_lock_lost_err_en		(clock_lock_lost_err_en),		// In	40MHz main clock lost lock
 
 // Sync error action enables
 	.sync_err_blanks_mpc_en		(sync_err_blanks_mpc_en),		// In	Sync error blanks LCTs to MPC
 	.sync_err_stops_pretrig_en	(sync_err_stops_pretrig_en),	// In	Sync error stops CLCT pre-triggers
 	.sync_err_stops_readout_en	(sync_err_stops_readout_en),	// In	Sync error stops L1A readouts
+	.sync_err_forced			(sync_err_forced),				// In	Force sync_err=1
 
 // Sync error types latched for VME readout
 	.sync_err					(sync_err),						// Out	Sync error OR of enabled types of error
-	.clct_bx0_sync_err_ff		(clct_bx0_sync_err_ff),			// Out	TMB  clock pulse count err bxn!=0+offset at ttc_bx0 arrival
 	.alct_ecc_rx_err_ff			(alct_ecc_rx_err_ff),			// Out	ALCT uncorrected ECC error in data ALCT received from TMB
 	.alct_ecc_tx_err_ff			(alct_ecc_tx_err_ff),			// Out	ALCT uncorrected ECC error in data ALCT transmitted to TMB
 	.bx0_match_err_ff			(bx0_match_err_ff),				// Out	ALCT alct_bx0 != clct_bx0
-	
+	.clock_lock_lost_err_ff		(clock_lock_lost_err_ff),		// Out	40MHz main clock lost lock FF
+
 // Sync error actions
 	.sync_err_blanks_mpc		(sync_err_blanks_mpc),			// Out	Sync error blanks LCTs to MPC
 	.sync_err_stops_pretrig		(sync_err_stops_pretrig),		// Out	Sync error stops CLCT pre-triggers
@@ -2699,41 +2794,30 @@
 //-------------------------------------------------------------------------------------------------------------------
 //	VME Interface Instantiation
 //-------------------------------------------------------------------------------------------------------------------
-// Convert global symbols to wires
-	wire	[3:0]	firmware_type	= `FIRMWARE_TYPE;			// C=Normal TMB, D=Debug PCB loopback version
-	wire	[3:0]	version			= `VERSION;					// Version revision number
-	wire	[15:0]	monthday		= `MONTHDAY;				// Version date
-	wire	[15:0]	year			= `YEAR;					// Version date
-	wire	[15:12]	fpgaid			= `FPGAID/16'h1000;			// FPGA Type XCVnnnn
-	wire	[15:0]	ise_version		= `ISE_VERSION;				// ISE Compiler version
-	wire			auto_vme		= `AUTO_VME;				// Auto init vme registers
-	wire			auto_jtag		= `AUTO_JTAG;				// Auto init jtag chain
-	wire			auto_phaser		= `AUTO_PHASER;				// Auto init digital phase shifters
-	wire			alct_muonic		= `ALCT_MUONIC;				// Floats ALCT board  in clock-space with independent time-of-flight delay
-	wire			cfeb_muonic		= `CFEB_MUONIC;				// Floats CFEB boards in clock-space with independent time-of-flight delay
+	defparam uvme.FIRMWARE_TYPE		= `FIRMWARE_TYPE;			// C=Normal TMB, D=Debug PCB loopback version
+	defparam uvme.VERSION			= `VERSION;					// Version revision number
+	defparam uvme.MONTHDAY			= `MONTHDAY;				// Version date
+	defparam uvme.YEAR				= `YEAR;					// Version date
+	defparam uvme.FPGAID			= `FPGAID;					// FPGA Type XCVnnnn
+	defparam uvme.ISE_VERSION		= `ISE_VERSION;				// ISE Compiler version
+	defparam uvme.AUTO_VME			= `AUTO_VME;				// Auto init vme registers
+	defparam uvme.AUTO_JTAG			= `AUTO_JTAG;				// Auto init jtag chain
+	defparam uvme.AUTO_PHASER		= `AUTO_PHASER;				// Auto init digital phase shifters
+	defparam uvme.ALCT_MUONIC		= `ALCT_MUONIC;				// Floats ALCT board  in clock-space with independent time-of-flight delay
+	defparam uvme.CFEB_MUONIC		= `CFEB_MUONIC;				// Floats CFEB boards in clock-space with independent time-of-flight delay
+	defparam uvme.CCB_BX0_EMULATOR	= `CCB_BX0_EMULATOR;		// Turns on bx0 emulator at power up, must be 0 for all CERN versions
 
 	vme uvme
 	(
 // Clock
 	.clock					(clock),						// In	TMB 40MHz clock
 	.clock_vme				(clock_vme),					// In	VME 10MHz clock
-	.clock_lock_lost		(clock_lock_lost),				// In	40MHz main clock lost lock FF
+	.clock_lock_lost_err	(clock_lock_lost_err),			// In	40MHz main clock lost lock FF
 	.ttc_resync				(ttc_resync),					// In	TTC resync
 	.global_reset			(global_reset),					// In	Global reset
 	.global_reset_en		(global_reset_en),				// Out	Enable global reset on lock_lost
 
 // Firmware version
-	.firmware_type			(firmware_type[3:0]),			// In	C=Normal TMB, D=Debug PCB loopback version
-	.version				(version[3:0]),					// In	Version revision number
-	.monthday				(monthday[15:0]),				// In	Version date
-	.year					(year[15:0]),					// In	Version date
-	.fpgaid					(fpgaid[15:12]),				// In	FPGA Type XCVnnnn
-	.ise_version			(ise_version[15:0]),			// In	ISE Compiler version
-	.alct_muonic			(alct_muonic),					// In	Floats ALCT board  in clock-space with independent time-of-flight delay
-	.cfeb_muonic			(cfeb_muonic),					// In	Floats CFEB boards in clock-space with independent time-of-flight delay
-	.auto_vme				(auto_vme),						// In	Auto init vme registers
-	.auto_jtag				(auto_jtag),					// In	Auto init jtag chain
-	.auto_phaser			(auto_phaser),					// In	Auto init digital phase shifters
 	.cfeb_exists			(cfeb_exists[MXCFEB-1:0]),		// In	CFEBs instantiated in this version
 	.revcode				(revcode[14:0]),				// Out	Firmware revision code
 
@@ -2901,6 +2985,7 @@
 	.vme_evcntres			(vme_evcntres),					// Out	Event counter reset, from VME
 	.vme_bcntres			(vme_bcntres),					// Out	Bunch crossing counter reset, from VME
 	.vme_bx0				(vme_bx0),						// Out	Bunch crossing zero, from VME
+	.vme_bx0_emu_en			(vme_bx0_emu_en),				// Out	BX0 emulator enable
 	.fmm_state				(fmm_state[2:0]),				// In	FMM machine state
 
 //	CCB TTC lock status
@@ -2919,8 +3004,9 @@
 	.alct_ext_trig_vme		(alct_ext_trig_vme),			// Out	1=Fire alct_ext_trig oneshot
 	.clct_ext_trig_vme		(clct_ext_trig_vme),			// Out	1=Fire clct_ext_trig oneshot
 	.ext_trig_both			(ext_trig_both),				// Out	1=clct_ext_trig fires alct and alct fires clct_trig, DC level
-	.l1accept_vme			(l1accept_vme),					// Out	1=fire ccb_l1accept oneshot
+	.l1a_vme				(l1a_vme),						// Out	1=fire ccb_l1accept oneshot
 	.l1a_delay_vme			(l1a_delay_vme[7:0]),			// Out	Internal L1A delay
+	.l1a_inj_ram_en			(l1a_inj_ram_en),				// Out	L1A injector RAM enable
 
 // ALCT Ports: Trigger Control
 	.cfg_alct_ext_trig_en	(cfg_alct_ext_trig_en),			// Out	1=Enable alct_ext_trig   from CCB
@@ -2929,6 +3015,7 @@
 	.cfg_alct_ext_inject	(cfg_alct_ext_inject),			// Out	1=Assert alct_ext_inject
 	.alct_clear				(alct_clear),					// Out	1=Blank alct_rx inputs
 	.alct_inject			(alct_inject),					// Out	1=Start ALCT injector
+	.alct_inj_ram_en		(alct_inj_ram_en),				// Out	1=Link  ALCT injector to CFEB injector RAM
 	.alct_inj_delay			(alct_inj_delay[4:0]),			// Out	ALCT Injector delay	
 	.alct0_inj				(alct0_inj[15:0]),				// Out	ALCT0 to inject				
 	.alct1_inj				(alct1_inj[15:0]),				// Out	ALCT1 to inject
@@ -2983,9 +3070,10 @@
 	.inj_febsel				(inj_febsel[MXCFEB-1:0]),		// Out	1=Select CFEBn for RAM read/write
 	.inj_wen				(inj_wen[2:0]),					// Out	1=Write enable injector RAM
 	.inj_rwadr				(inj_rwadr[9:0]),				// Out	Injector RAM read/write address
-	.inj_wdata				(inj_wdata[15:0]),				// Out	Injector RAM write data
+	.inj_wdata				(inj_wdata[17:0]),				// Out	Injector RAM write data
 	.inj_ren				(inj_ren[2:0]),					// Out	1=Read enable Injector RAM
-	.inj_rdata				(inj_rdata_mux[15:0]),			// In	Injector RAM read data
+	.inj_rdata				(inj_rdata_mux[17:0]),			// In	Injector RAM read data
+	.inj_ramout_busy		(inj_ramout_busy),				// In	Injector busy
 
 // CFEB Triad Decoder Ports
 	.triad_persist			(triad_persist[3:0]),			// Out	Triad 1/2-strip persistence
@@ -3035,6 +3123,7 @@
 	.cfeb4_ly5_hcm			(cfeb_ly5_hcm[4][MXDS-1:0]),	// Out	1=enable DiStrip
 
 // Bad CFEB rx bit detection
+	.bcb_read_enable		(bcb_read_enable),				// Out	Enable blocked bits in readout
 	.cfeb_badbits_reset		(cfeb_badbits_reset[4:0]),		// Out	Reset bad cfeb bits FFs
 	.cfeb_badbits_block		(cfeb_badbits_block[4:0]),		// Out	Allow bad bits to block triads
 	.cfeb_badbits_found		(cfeb_badbits_found[4:0]),		// In	CFEB[n] has at least 1 bad bit
@@ -3134,6 +3223,7 @@
 	.l1a_internal			(l1a_internal),						// Out	Generate internal Level 1, overrides external
 	.l1a_internal_dly		(l1a_internal_dly[MXL1WIND-1:0]),	// Out	 Delay internal l1a to shift position in l1a match window
 	.l1a_window				(l1a_window[MXL1WIND-1:0]),			// Out	Level1 Accept window width after delay
+	.l1a_win_pri_en			(l1a_win_pri_en),					// Out	Enable L1A window priority
 	.l1a_lookback			(l1a_lookback[MXBADR-1:0]),			// Out	Bxn to look back from l1a wr_buf_adr
 
 	.l1a_allow_match		(l1a_allow_match),					// Out	Readout allows tmb trig pulse in L1A window (normal mode)
@@ -3147,9 +3237,10 @@
 	.bxn_offset_pretrig		(bxn_offset_pretrig[MXBXN-1:0]),	// Out	BXN offset at reset, for pretrig bxn
 	.bxn_offset_l1a			(bxn_offset_l1a[MXBXN-1:0]),		// Out	BXN offset at reset, for l1a bxn
 	.lhc_cycle				(lhc_cycle[MXBXN-1:0]),				// Out	LHC period, max BXN count+1
-	.l1a_offset				(l1a_offset[MXL1A-1:0]),			// Out	L1A counter preset value
+	.l1a_offset				(l1a_offset[MXL1ARX-1:0]),			// Out	L1A counter preset value
 
 // Sequencer Ports: Latched CLCTs + Status
+	.event_clear_vme		(event_clear_vme),					// Out	Event clear for vme diagnostic registers
 	.clct0_vme				(clct0_vme[MXCLCT-1:0]),			// In	First  CLCT
 	.clct1_vme				(clct1_vme[MXCLCT-1:0]),			// In	Second CLCT
 	.clctc_vme				(clctc_vme[MXCLCTC-1:0]),			// In	Common to CLCT0/1 to TMB
@@ -3178,7 +3269,8 @@
 	.buf_q_ovf_err			(buf_q_ovf_err),					// In	Tried to push when stack full
 	.buf_q_udf_err			(buf_q_udf_err),					// In	Tried to pop when stack empty
 	.buf_q_adr_err			(buf_q_adr_err),					// In	Fence adr popped from stack doesnt match rls adr
-	.buf_stalled			(buf_stalled),						// In	Buffer write pointer hit a fence and stalled
+	.buf_stalled			(buf_stalled),						// In	Buffer write pointer hit a fence and is stalled now
+	.buf_stalled_once		(buf_stalled_once),					// In	Buffer stalled at least once since last resync
 	.buf_fence_dist			(buf_fence_dist[MXBADR-1:0]),		// In	Current distance to next fence 0 to 2047
 	.buf_fence_cnt			(buf_fence_cnt[MXBADR-1+1:0]),		// In	Number of fences in fence RAM currently
 	.buf_fence_cnt_peak		(buf_fence_cnt_peak[MXBADR-1+1:0]),	// In	Peak number of fences in fence RAM
@@ -3376,6 +3468,7 @@
 	.event_counter60		(event_counter60[MXCNTVME-1:0]),	// In
 	.event_counter61		(event_counter61[MXCNTVME-1:0]),	// In
 	.event_counter62		(event_counter62[MXCNTVME-1:0]),	// In
+	.event_counter63		(event_counter63[MXCNTVME-1:0]),	// In
 
 // Header Counter Ports
 	.hdr_clear_on_resync	(hdr_clear_on_resync),				// Out	Clear header counters on ttc_resync
@@ -3526,18 +3619,20 @@
 	.alct_ecc_rx_err_en			(alct_ecc_rx_err_en),			// Out	ALCT uncorrected ECC error in data ALCT received from TMB
 	.alct_ecc_tx_err_en			(alct_ecc_tx_err_en),			// Out	ALCT uncorrected ECC error in data ALCT transmitted to TMB
 	.bx0_match_err_en			(bx0_match_err_en),				// Out	ALCT alct_bx0 != clct_bx0
+	.clock_lock_lost_err_en		(clock_lock_lost_err_en),		// Out	40MHz main clock lost lock
 
 // Sync error action enables
 	.sync_err_blanks_mpc_en		(sync_err_blanks_mpc_en),		// Out	Sync error blanks LCTs to MPC
 	.sync_err_stops_pretrig_en	(sync_err_stops_pretrig_en),	// Out	Sync error stops CLCT pre-triggers
 	.sync_err_stops_readout_en	(sync_err_stops_readout_en),	// Out	Sync error stops L1A readouts
+	.sync_err_forced			(sync_err_forced),				// Out	Force sync_err=1
 
 // Sync error types latched for VME readout
 	.sync_err					(sync_err),						// In	Sync error OR of enabled types of error
-	.clct_bx0_sync_err_ff		(clct_bx0_sync_err_ff),			// In	TMB  clock pulse count err bxn!=0+offset at ttc_bx0 arrival
 	.alct_ecc_rx_err_ff			(alct_ecc_rx_err_ff),			// In	ALCT uncorrected ECC error in data ALCT received from TMB
 	.alct_ecc_tx_err_ff			(alct_ecc_tx_err_ff),			// In	ALCT uncorrected ECC error in data ALCT transmitted to TMB
 	.bx0_match_err_ff			(bx0_match_err_ff),				// In	ALCT alct_bx0 != clct_bx0
+	.clock_lock_lost_err_ff		(clock_lock_lost_err_ff),		// In	40MHz main clock lost lock FF
 
 // Sump
 	.vme_sump					(vme_sump)						// Out	Unused signals
@@ -3547,7 +3642,7 @@
 // Unused Signal Sump
 //-------------------------------------------------------------------------------------------------------------------
 	assign sump = ccb_sump | alct_sump  |rpc_sump | sequencer_sump | tmb_sump | buf_sump	|
-	vme_sump | rpc_inj_sel | mini_sump | (|cfeb_sump);
+	vme_sump | rpc_inj_sel | mini_sump | (|cfeb_sump) | inj_ram_sump;
 
 //-------------------------------------------------------------------------------------------------------------------
 	endmodule

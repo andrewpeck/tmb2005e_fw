@@ -45,6 +45,8 @@
 //	08/10/09 Add ffs to transfer dc quadrant selects into 40mhz time domain before sending to clock_mux
 //	09/11/09 Add quadrant update linked to fire stobe
 //	09/18/09 Relocate dcms to shorten clock paths
+//	04/27/10 Allow ttc_resync to clear clock_lock_lost
+//	05/12/10 Move clock_lock_lost ff to sync_err module, remove ttc_resync
 //------------------------------------------------------------------------------------------------------------------
 	module clock_virtex2
 	(
@@ -74,9 +76,9 @@
 	clock_cfeb4_rxd,
 
 // Global reset
-	clock_lock_lost,
-	global_reset,
 	global_reset_en,
+	global_reset,
+	clock_lock_lost_err,
 
 // Clock DCM lock status
 	lock_tmb_clock0,
@@ -195,9 +197,9 @@
 	output			clock_cfeb4_rxd;		// 40MHz CFEB receive  data clock 1x
 
 // Global reset
-	output			clock_lock_lost;		// 40MHz main clock lost lock FF
-	output			global_reset;			// Global reset, asserted until main DLL locks
 	input			global_reset_en;		// Enable global reset on lock_lost
+	output			global_reset;			// Global reset, asserted until main DLL locks
+	output			clock_lock_lost_err;	// 40MHz main clock lost lock FF
 
 // Clock DCM lock status
 	output			lock_tmb_clock0;		// DCM lock status
@@ -939,16 +941,16 @@
 // Global reset for fpga-wide state machines, asserted until main DLL locks
 //------------------------------------------------------------------------------------------------------------------
 	reg global_reset    = 1;
-	reg clock_lock_lost = 0;
 	reg startup_done	= 0;
 
 	wire first_lock = (lock_tmb_clock0 || startup_done);
 
 	always @(posedge clock) begin
-	startup_done	<=	first_lock;												// Latches on 1st dll lock
+	startup_done	<=	first_lock;												// Latches  on 1st dll lock
 	global_reset	<= !first_lock || (!lock_tmb_clock0 && global_reset_en);	// Re-fires on lock lost
-	clock_lock_lost	<= (!global_reset && !lock_tmb_clock0) || clock_lock_lost;	// Latches  on lock lost
 	end
+
+	assign clock_lock_lost_err = (!global_reset && !lock_tmb_clock0);			// Latches  on lock lost in sync module
 
 //------------------------------------------------------------------------------------------------------------------
 // Pseudo-locked status for unused clock inputs, DDR FFs q0+q1 should add to 1 if clock is running

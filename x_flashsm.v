@@ -20,6 +20,7 @@
 // 09/23/05 Mod for ISE 7.1i
 // 09/23/05 Re-write as state machine
 // 09/28/06 XST 8.2 mods, x_flash(11) becomes x_flashsm(19) for same 13ms flash
+// 04/26/10 Mod for xst 11
 //------------------------------------------------------------------------------------------------------------------
 	module x_flashsm (trigger,hold,clock,out);
 
@@ -62,7 +63,7 @@
 
 	always @(posedge clock) begin
 	if (flash_sm != flash)	cnt = 0;
-	else					cnt = cnt + 1;
+	else					cnt = cnt + 1'b1;
 	end
 
 	wire cnt_done = cnt[MXCNT];

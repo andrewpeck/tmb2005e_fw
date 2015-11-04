@@ -85,6 +85,10 @@
 //	01/11/10 Move bad bits check downstream of pattern injector
 //	01/13/10 Add single bx bad bit detection mode
 //	01/14/10 Move bad bits check to triad_s1
+//	03/05/10 Move hot channel + bad bits blocking ahead of raw hits ram, a big mistake, but poobah insists
+//	03/07/10 Add masked cfebs to blocked list
+//	06/30/10 Mod injector RAM for alct and l1a bits
+//	07/07/10 Revert to discrete ren, wen
 //-------------------------------------------------------------------------------------------------------------------
 	module cfeb
 	(
@@ -111,6 +115,8 @@
 	inj_wdata,
 	inj_ren,
 	inj_rdata,
+	inj_ramout,
+	inj_ramout_pulse,
 
 // Raw Hits FIFO RAM
 	fifo_wen,
@@ -132,6 +138,8 @@
 	cfeb_badbits_block,
 	cfeb_badbits_nbx,
 	cfeb_badbits_found,
+	cfeb_blockedbits,
+
 	ly0_badbits,
 	ly1_badbits,
 	ly2_badbits,
@@ -212,9 +220,11 @@
 	input	[11:0]			inj_last_tbin;		// Last tbin, may wrap past 1024 ram adr
 	input	[2:0]			inj_wen;			// 1=Write enable injector RAM
 	input	[9:0]			inj_rwadr;			// Injector RAM read/write address
-	input	[15:0]			inj_wdata;			// Injector RAM write data
+	input	[17:0]			inj_wdata;			// Injector RAM write data
 	input	[2:0]			inj_ren;			// Injector RAM select
-	output	[15:0]			inj_rdata;			// Injector RAM read data
+	output	[17:0]			inj_rdata;			// Injector RAM read data
+	output	[5:0]			inj_ramout;			// Injector RAM read data for ALCT and L1A
+	output					inj_ramout_pulse;	// Injector RAM is injecting
 
 // Raw Hits FIFO RAM
 	input					fifo_wen;			// 1=Write enable FIFO RAM
@@ -236,6 +246,8 @@
 	input					cfeb_badbits_block;	// Allow bad bits to block triads
 	input	[15:0]			cfeb_badbits_nbx;	// Cycles a bad bit must be continuously high
 	output					cfeb_badbits_found;	// This CFEB has at least 1 bad bit
+	output	[MXDS*MXLY-1:0]	cfeb_blockedbits;	// 1=CFEB rx bit blocked by hcm or went bad, packed
+
 	output	[MXDS-1:0]		ly0_badbits;		// 1=CFEB rx bit went bad
 	output	[MXDS-1:0]		ly1_badbits;		// 1=CFEB rx bit went bad
 	output	[MXDS-1:0]		ly2_badbits;		// 1=CFEB rx bit went bad
@@ -500,8 +512,9 @@
 	end
 
 // Injector RAM signals
-	wire [15:0]		inj_rdataa [2:0];
-	wire [MXDS-1:0] triad_inj  [MXLY-1:0];
+	wire [17:0]		inj_rdataa  [2:0];
+	wire [1:0]		inj_ramoutb [2:0];
+	wire [MXDS-1:0] triad_inj   [MXLY-1:0];
 
 // Injector RAM: 3 RAMs each 2 layers x 8 triads wide x 1024 tbins deep. PortA: r/w via VME, PortB: r via injector SM
 	genvar i;
@@ -518,9 +531,9 @@
 	.CLKA	(clock),							// Port A Clock
 	.ADDRA	(inj_rwadr[9:0]),					// Port A 10-bit Address Input
 	.DIA	(inj_wdata[15:0]),					// Port A 16-bit Data Input
-	.DIPA	(2'b00),							// Port A 2-bit parity Input
-	.DOA	(inj_rdataa[i]),					// Port A 16-bit Data Output
-	.DOPA	(),									// Port A 2-bit Parity Output
+	.DIPA	(inj_wdata[17:16]),					// Port A 2-bit parity Input
+	.DOA	(inj_rdataa[i][15:0]),				// Port A 16-bit Data Output
+	.DOPA	(inj_rdataa[i][17:16]),				// Port A 2-bit Parity Output
 
 	.WEB	(1'b0),								// Port B Write Enable Input
 	.ENB	(1'b1),								// Port B RAM Enable Input
@@ -530,7 +543,7 @@
 	.DIB	({16{1'b0}}),						// Port B 16-bit Data Input
 	.DIPB	(2'b00),							// Port B 2-bit parity Input
 	.DOB	({triad_inj[2*i+1],triad_inj[2*i]}),// Port B 16-bit Data Output
-	.DOPB	());
+	.DOPB	(inj_ramoutb[i][1:0]));				// Port B 2-bit Parity Output
 	end
 	endgenerate
 
@@ -576,9 +589,9 @@
 //	defparam ram[2].inj.INIT_01 =256'h0000000000000000000000000000000000000000000000000000000000000000;
 
 // Multiplex Injector RAM output data, tri-state output if CFEB is not selected
-	reg [15:0] inj_rdata=0;
+	reg [17:0] inj_rdata;
 
-	always @(inj_rdataa[0]or inj_ren) begin
+	always @(inj_rdataa[0] or inj_ren) begin
 	case (inj_ren[2:0])
 	3'b001:	inj_rdata <= inj_rdataa[0];
 	3'b010:	inj_rdata <= inj_rdataa[1];
@@ -586,6 +599,12 @@
 	default	inj_rdata <= inj_rdataa[0];
 	endcase
 	end
+
+	assign inj_ramout[1:0] = inj_ramoutb[0][1:0];
+	assign inj_ramout[3:2] = inj_ramoutb[1][1:0];
+	assign inj_ramout[5:4] = inj_ramoutb[2][1:0];
+
+	assign inj_ramout_pulse	= !pass_ff;
 
 // Multiplex Triads from previous stage with Injector RAM data, output to next stage
 	wire [MXDS-1:0] triad_s1 [MXLY-1:0];
@@ -599,22 +618,120 @@
 
 	assign triad_tp	= triad_s1[2][1];	// Triad 1 hs4567 layer 2 test point for internal scope
 
+//-------------------------------------------------------------------------------------------------------------------
+// Stage 2: Check for CFEB bits stuck at logic 1 for too long + Apply hot channel mask
+//-------------------------------------------------------------------------------------------------------------------
+// FF buffer control inputs
+	reg [15:0]	cfeb_badbits_nbx_minus1 = 16'hFFFF;
+	reg			cfeb_badbits_block_ena  = 0;
+	reg			single_bx_mode = 0;
+
+	always @(posedge clock) begin
+	cfeb_badbits_block_ena	<= cfeb_badbits_block;
+	cfeb_badbits_nbx_minus1	<= cfeb_badbits_nbx-1;
+	single_bx_mode			<= cfeb_badbits_nbx==1;
+	end
+
+// Periodic check pulse counter
+	reg [15:0] check_cnt=16'h000F;
+
+	wire check_cnt_ena = (check_cnt < cfeb_badbits_nbx_minus1);
+	
+	always @(posedge clock) begin
+	if      (cfeb_badbits_reset) check_cnt <= 0;
+	else if (check_cnt_ena     ) check_cnt <= check_cnt+1;
+	else                         check_cnt <= 0;
+	end
+
+	wire check_pulse = (check_cnt==0);
+
+// Check CFEB bits with high-too-long state machine
+	wire [MXDS-1:0] badbits [MXLY-1:0];
+
+	genvar ids;
+	genvar ily;
+	generate
+	for (ids=0; ids<MXDS; ids=ids+1) begin: ckbitds
+	for (ily=0; ily<MXLY; ily=ily+1) begin: ckbitly
+
+	cfeb_bit_check ucfeb_bit_check (
+	.clock			(clock),				// 40MHz main clock
+	.reset			(cfeb_badbits_reset),	// Clear stuck bit FFs
+	.check_pulse	(check_pulse),			// Periodic checking
+	.single_bx_mode	(single_bx_mode),		// Check for single bx pulses		
+	.bit_in			(triad_s1[ily][ids]),	// Bit to check
+	.bit_bad		(badbits[ily][ids]));	// Bit went bad flag
+
+	end
+	end
+	endgenerate
+
+// Summary badbits for this CFEB
+	reg cfeb_badbits_found=0;
+
+	wire cfeb_badbits_or =
+	(|badbits[0][7:0])|
+	(|badbits[1][7:0])|
+	(|badbits[2][7:0])|
+	(|badbits[3][7:0])|
+	(|badbits[4][7:0])|
+	(|badbits[5][7:0]);
+
+	always @(posedge clock) begin
+	cfeb_badbits_found <= cfeb_badbits_or;
+	end
+
+// Blocked triad bits list, 1=blocked 0=ok to tuse
+	reg [MXDS-1:0] blockedbits [MXLY-1:0];
+
+	always @(posedge clock) begin
+	blockedbits[0] = ~ly0_hcm | (badbits[0] * cfeb_badbits_block_ena);
+	blockedbits[1] = ~ly1_hcm | (badbits[1] * cfeb_badbits_block_ena);
+	blockedbits[2] = ~ly2_hcm | (badbits[2] * cfeb_badbits_block_ena);
+	blockedbits[3] = ~ly3_hcm | (badbits[3] * cfeb_badbits_block_ena);
+	blockedbits[4] = ~ly4_hcm | (badbits[4] * cfeb_badbits_block_ena);
+	blockedbits[5] = ~ly5_hcm | (badbits[5] * cfeb_badbits_block_ena);
+	end
+
+// Apply Hot Channel Mask to block Errant DiStrips: 1=enable DiStrip, not blocking hstrips, they share a triad start bit
+	wire [MXDS-1:0] triad_s2 [MXLY-1:0];	// Masked triads
+
+	assign triad_s2[0] = triad_s1[0] & ~blockedbits[0];
+	assign triad_s2[1] = triad_s1[1] & ~blockedbits[1];
+	assign triad_s2[2] = triad_s1[2] & ~blockedbits[2];
+	assign triad_s2[3] = triad_s1[3] & ~blockedbits[3];
+	assign triad_s2[4] = triad_s1[4] & ~blockedbits[4];
+	assign triad_s2[5] = triad_s1[5] & ~blockedbits[5];
+
+// Map 2D arrays to 1D for VME
+	assign ly0_badbits = badbits[0];
+	assign ly1_badbits = badbits[1];
+	assign ly2_badbits = badbits[2];
+	assign ly3_badbits = badbits[3];
+	assign ly4_badbits = badbits[4];
+	assign ly5_badbits = badbits[5];
+
+// Map to 1D 48bits for readout machine, mark all blocked if mask_all=0
+	assign cfeb_blockedbits = (mask_all) ? {blockedbits[5],blockedbits[4],blockedbits[3],blockedbits[2],blockedbits[1],blockedbits[0]}
+	                                     : 48'hFFFFFFFFFFFF;
+//-------------------------------------------------------------------------------------------------------------------
+// Raw hits RAM storage
+//-------------------------------------------------------------------------------------------------------------------
 // Calculate parity for raw hits RAM write data
 	wire [MXLY-1:0] parity_wr;
 	wire [MXLY-1:0] parity_rd;
 
-	assign parity_wr[0] = ~(^ triad_s1[0][MXDS-1:0]);
-	assign parity_wr[1] = ~(^ triad_s1[1][MXDS-1:0]);
-	assign parity_wr[2] = ~(^ triad_s1[2][MXDS-1:0]);
-	assign parity_wr[3] = ~(^ triad_s1[3][MXDS-1:0]);
-	assign parity_wr[4] = ~(^ triad_s1[4][MXDS-1:0]);
-	assign parity_wr[5] = ~(^ triad_s1[5][MXDS-1:0]);
+	assign parity_wr[0] = ~(^ triad_s2[0][MXDS-1:0]);
+	assign parity_wr[1] = ~(^ triad_s2[1][MXDS-1:0]);
+	assign parity_wr[2] = ~(^ triad_s2[2][MXDS-1:0]);
+	assign parity_wr[3] = ~(^ triad_s2[3][MXDS-1:0]);
+	assign parity_wr[4] = ~(^ triad_s2[4][MXDS-1:0]);
+	assign parity_wr[5] = ~(^ triad_s2[5][MXDS-1:0]);
 
 // Raw hits RAM stores incoming hits in port A, reads out to DMB via port B
 	wire [MXDS-1:0] fifo_rdata_ly [MXLY-1:0];
 	wire [MXLY-1:0] dopa;
 
-	genvar ily;
 	generate
 	for (ily=0; ily<=MXLY-1; ily=ily+1) begin: raw
 	RAMB16_S9_S9 #(
@@ -627,7 +744,7 @@
 	.SSRA			(1'b0),						// Port A Synchronous Set/Reset Input
 	.CLKA			(clock),					// Port A Clock
 	.ADDRA			(fifo_wadr),				// Port A 11-bit Address Input
-	.DIA			(triad_s1[ily]),			// Port A 8-bit Data Input
+	.DIA			(triad_s2[ily]),			// Port A 8-bit Data Input
 	.DIPA			(parity_wr[ily]),			// Port A 1-bit parity Input
 	.DOA			(),							// Port A 8-bit Data Output
 	.DOPA			(dopa[ily]),				// Port A 1-bit Parity Output
@@ -661,95 +778,11 @@
 	assign fifo_rdata = fifo_rdata_ly[fifo_sel];
 
 //-------------------------------------------------------------------------------------------------------------------
-// Check for CFEB bits stuck at logic 1 for too long
-//-------------------------------------------------------------------------------------------------------------------
-// FF buffer control inputs
-	reg [15:0]	cfeb_badbits_nbx_minus1 = 16'hFFFF;
-	reg			cfeb_badbits_block_ena  = 0;
-	reg			single_bx_mode = 0;
-
-	always @(posedge clock) begin
-	cfeb_badbits_block_ena	<= cfeb_badbits_block;
-	cfeb_badbits_nbx_minus1	<= cfeb_badbits_nbx-1;
-	single_bx_mode			<= cfeb_badbits_nbx==1;
-	end
-
-// Periodic check pulse counter
-	reg [15:0] check_cnt=16'h000F;
-
-	wire check_cnt_ena = (check_cnt < cfeb_badbits_nbx_minus1);
-	
-	always @(posedge clock) begin
-	if      (cfeb_badbits_reset) check_cnt <= 0;
-	else if (check_cnt_ena     ) check_cnt <= check_cnt+1;
-	else                         check_cnt <= 0;
-	end
-
-	wire check_pulse = (check_cnt==0);
-
-// Check CFEB bits with high-too-long state machine
-	wire [MXDS-1:0] badbit [MXLY-1:0];
-
-	genvar ids;
-	generate
-	for (ids=0; ids<MXDS; ids=ids+1) begin: ckbitds
-	for (ily=0; ily<MXLY; ily=ily+1) begin: ckbitly
-
-	cfeb_bit_check ucfeb_bit_check (
-	.clock			(clock),				// 40MHz main clock
-	.reset			(cfeb_badbits_reset),	// Clear stuck bit FFs
-	.check_pulse	(check_pulse),			// Periodic checking
-	.single_bx_mode	(single_bx_mode),		// Check for single bx pulses		
-	.bit_in			(triad_s1[ily][ids]),	// Bit to check
-	.bit_bad		(badbit[ily][ids]));	// Bit went bad flag
-
-	end
-	end
-	endgenerate
-
-// Summary badbit for this CFEB
-	reg cfeb_badbits_found=0;
-
-	wire cfeb_badbits_or =
-	(|badbit[0][7:0])|
-	(|badbit[1][7:0])|
-	(|badbit[2][7:0])|
-	(|badbit[3][7:0])|
-	(|badbit[4][7:0])|
-	(|badbit[5][7:0]);
-
-	always @(posedge clock) begin
-	cfeb_badbits_found <= cfeb_badbits_or;
-	end
-
-// Map 2D arrays to 1D for output ports
-	assign ly0_badbits[MXDS-1:0] = badbit[0][MXDS-1:0];
-	assign ly1_badbits[MXDS-1:0] = badbit[1][MXDS-1:0];
-	assign ly2_badbits[MXDS-1:0] = badbit[2][MXDS-1:0];
-	assign ly3_badbits[MXDS-1:0] = badbit[3][MXDS-1:0];
-	assign ly4_badbits[MXDS-1:0] = badbit[4][MXDS-1:0];
-	assign ly5_badbits[MXDS-1:0] = badbit[5][MXDS-1:0];
-
-// Convert bad bit arrays to bad bit masks ala hcm
-	wire [MXDS-1:0] ly0_bbm, ly1_bbm, ly2_bbm, ly3_bbm, ly4_bbm, ly5_bbm;
-
-	assign ly0_bbm[MXDS-1:0] = ~(badbit[0][MXDS-1:0] * cfeb_badbits_block_ena);
-	assign ly1_bbm[MXDS-1:0] = ~(badbit[1][MXDS-1:0] * cfeb_badbits_block_ena);
-	assign ly2_bbm[MXDS-1:0] = ~(badbit[2][MXDS-1:0] * cfeb_badbits_block_ena);
-	assign ly3_bbm[MXDS-1:0] = ~(badbit[3][MXDS-1:0] * cfeb_badbits_block_ena);
-	assign ly4_bbm[MXDS-1:0] = ~(badbit[4][MXDS-1:0] * cfeb_badbits_block_ena);
-	assign ly5_bbm[MXDS-1:0] = ~(badbit[5][MXDS-1:0] * cfeb_badbits_block_ena);
-
-//-------------------------------------------------------------------------------------------------------------------
-// Stage 2:	Triad Decoder
+// Stage 3:	Triad Decoder
 //			Decodes Triads into DiStrips, Strips, 1/2-Strips.
 //			Digital One-shots stretch 1/2-Strip pulses for pattern finding.
 //			Hot channel mask applied to Triad DiStrips after storage, but before Triad decoder
 //-------------------------------------------------------------------------------------------------------------------
-// Stage 2 Masked Triads
-	wire [MXDS-1:0] triad_s2 [MXLY-1:0];	// Masked triads
-	wire [MXHS-1:0] hs		 [MXLY-1:0];	// Decoded 1/2-strip pulses
-
 // Local buffer Triad Decoder controls
 	reg			persist1 = 0;
 	reg	[3:0]	persist  = 0;
@@ -759,16 +792,9 @@
 	persist1 <=	(triad_persist==1 || triad_persist==0);
 	end
 
-// Apply Hot Channel Mask to block Errant DiStrips: 1=enable DiStrip, not blocking hstrips, they share a triad start bit
-	assign triad_s2[0] = triad_s1[0] & ly0_hcm & ly0_bbm;
-	assign triad_s2[1] = triad_s1[1] & ly1_hcm & ly1_bbm;
-	assign triad_s2[2] = triad_s1[2] & ly2_hcm & ly2_bbm;
-	assign triad_s2[3] = triad_s1[3] & ly3_hcm & ly3_bbm;
-	assign triad_s2[4] = triad_s1[4] & ly4_hcm & ly4_bbm;
-	assign triad_s2[5] = triad_s1[5] & ly5_hcm & ly5_bbm;
-
 // Instantiate mxly*mxds = 48 triad decoders
 	wire [MXDS-1:0] tskip [MXLY-1:0];	// Skipped triads
+	wire [MXHS-1:0] hs    [MXLY-1:0];	// Decoded 1/2-strip pulses
 
 	generate
 	for (ily=0; ily<=MXLY-1; ily=ily+1) begin: ily_loop

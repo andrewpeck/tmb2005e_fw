@@ -62,6 +62,8 @@
 //	05/08/09 Add clct pretrigger marker to rpc RAM
 //	05/08/09 Remove miniscope and rpc ram address fixed offsets
 //	05/11/09 Add miniscope 1st word option
+//	03/06/10 Add cfeb blockedbits readout
+//	03/07/10 Tune timing for blocked bits readout to sequencer
 //------------------------------------------------------------------------------------------------------------------
 	module	buffer_read_ctrl
 	(
@@ -86,6 +88,13 @@
 	fifo2_rdata_cfeb,
 	fifo3_rdata_cfeb,
 	fifo4_rdata_cfeb,
+
+// CFEB blockedbits Data Ports
+	cfeb0_blockedbits,
+	cfeb1_blockedbits,
+	cfeb2_blockedbits,
+	cfeb3_blockedbits,
+	cfeb4_blockedbits,
 
 // RPC Raw hits Data Ports
 	fifo0_rdata_rpc,
@@ -114,6 +123,12 @@
 	rd_ncfebs,
 	rd_fifo_adr,
 
+// CFEB Blockedbits Readout Control
+	rd_start_bcb,
+	rd_abort_bcb,
+	rd_list_bcb,
+	rd_ncfebs_bcb,
+
 // RPC Sequencer Readout Control
 	rd_start_rpc,
 	rd_abort_rpc,
@@ -134,6 +149,13 @@
 	cfeb_rawhits,
 	cfeb_fifo_busy,
 
+// CFEB Blockedbits Frame Output
+	bcb_first_frame,
+	bcb_last_frame,
+	bcb_blkbits,
+	bcb_cfeb_adr,
+	bcb_fifo_busy,
+
 // RPC Sequencer Frame Output
 	rpc_first_frame,
 	rpc_last_frame,
@@ -152,6 +174,7 @@
 `ifdef DEBUG_BUFFER_READ_CTRL
 	,fifo_wen
 	,read_csm_dsp
+	,read_bcb_dsp
 	,read_rsm_dsp
 	,read_msm_dsp
 
@@ -172,6 +195,20 @@
 	,cfeb_cnt_clr
 	,cfeb_tbin_cnt_clr
 	,cfeb_layer_cnt_clr
+
+	,cfeb_cnt_bcb
+	,cfeb_blockedbits
+	,cfeb_slice_cnt_bcb
+	,cfeb_slice_last_bcb
+	,cfeb_sel_bcb
+
+	,bcb_done
+	,bcb_slice_done
+	,bcb_reset
+	,cfeb_cnt_bcb_clr
+	,cfeb_slice_cnt_bcb_clr
+	,bcb_data_valid
+	,rd_bcb_busy
 
 	,rpc_done
 	,rpc_tbin_done
@@ -197,6 +234,8 @@
 	parameter MXCFEB				= 5;			// Number CFEBs
 	parameter MXCFEBB				= 3;			// Number CFEB ID bits
 	parameter MXTBIN				= 5;			// Time bin address width
+	parameter MXLY					= 6;			// Number Layers in CSC
+	parameter MXDS					= 8;			// Number of DiStrips per layer
 	parameter MXRPC					= 2;			// Number RPCs
 	parameter MXRPCB				= 1;			// Number RPC ID bits
 	parameter READ_ADR_OFFSET		= 6;			// Number clocks from first address to pretrigger adr latch, trial 04/22/08
@@ -209,45 +248,53 @@
 	parameter RAM_WIDTH				= 8;			// Data width
 
 //------------------------------------------------------------------------------------------------------------------
-// CCB Ports
+// Ports
 //------------------------------------------------------------------------------------------------------------------
+// CCB
 	input						clock;				// 40MHz TMB main clock
 	input						ttc_resync;			// Resync TMB
 
-// CFEB Raw Hits FIFO RAM Ports
+// CFEB Raw Hits FIFO RAM
 	output	[RAM_ADRB-1:0]		fifo_radr_cfeb;		// FIFO RAM read tbin address
 	output	[2:0]				fifo_sel_cfeb;		// FIFO RAM read layer address 0-5
 
-// RPC Raw Hits FIFO RAM Ports
+// RPC Raw Hits FIFO RAM
 	output	[RAM_ADRB-1:0]		fifo_radr_rpc;		// FIFO RAM read tbin address
 	output	[0:0]				fifo_sel_rpc;		// FIFO RAM read slice address 0-1
 
-// Miniscpe FIFO RAM Ports
+// Miniscpe FIFO RAM
 	output	[RAM_ADRB-1:0]		fifo_radr_mini;		// Mini RAM read address
 
-// CFEB Raw Hits Data Ports
+// CFEB Raw Hits Data
 	input	[RAM_WIDTH-1:0]		fifo0_rdata_cfeb;	// FIFO RAM read data
 	input	[RAM_WIDTH-1:0]		fifo1_rdata_cfeb;	// FIFO RAM read data
 	input	[RAM_WIDTH-1:0]		fifo2_rdata_cfeb;	// FIFO RAM read data
 	input	[RAM_WIDTH-1:0]		fifo3_rdata_cfeb;	// FIFO RAM read data
 	input	[RAM_WIDTH-1:0]		fifo4_rdata_cfeb;	// FIFO RAM read data
 
-// RPC Raw hits Data Ports
+// CFEB Blockedbits Data
+	input	[MXDS*MXLY-1:0]		cfeb0_blockedbits;	// 1=CFEB rx bit blocked by hcm or went bad, packed
+	input	[MXDS*MXLY-1:0]		cfeb1_blockedbits;	// 1=CFEB rx bit blocked by hcm or went bad, packed
+	input	[MXDS*MXLY-1:0]		cfeb2_blockedbits;	// 1=CFEB rx bit blocked by hcm or went bad, packed
+	input	[MXDS*MXLY-1:0]		cfeb3_blockedbits;	// 1=CFEB rx bit blocked by hcm or went bad, packed
+	input	[MXDS*MXLY-1:0]		cfeb4_blockedbits;	// 1=CFEB rx bit blocked by hcm or went bad, packed
+
+// RPC Raw hits Data
 	input	[RAM_WIDTH-1+4:0]	fifo0_rdata_rpc;	// FIFO RAM read data, rpc
 	input	[RAM_WIDTH-1+4:0]	fifo1_rdata_rpc;	// FIFO RAM read data, rpc
 
-// Miniscope Data Ports
+// Miniscope Data
 	input	[RAM_WIDTH*2-1:0]	fifo_rdata_mini;	// FIFO RAM read data, miniscope
 
-// CFEB VME Configuration Ports
+// CFEB VME Configuration
 	input	[MXTBIN-1:0]		fifo_tbins_cfeb;	// Number CFEB FIFO time bins to read out
 	input	[MXTBIN-1:0]		fifo_pretrig_cfeb;	// Number CFEB FIFO time bins before pretrigger
 
-// RPC VME Configuration Ports
+// RPC VME Configuration
 	input	[MXTBIN-1:0]		fifo_tbins_rpc;		// Number RPC FIFO time bins to read out
 	input	[MXTBIN-1:0]		fifo_pretrig_rpc;	// Number RPC FIFO time bins before pretrigger
 
-// Minisocpe VME Configuration Ports
+// Minisocpe VME Configuration
 	input						mini_tbins_word;	// Insert tbins and pretrig tbins in 1st word
 	input	[MXTBIN-1:0]		fifo_tbins_mini;	// Number Mini FIFO time bins to read out
 	input	[MXTBIN-1:0]		fifo_pretrig_mini;	// Number Mini FIFO time bins before pretrigger
@@ -258,6 +305,12 @@
 	input	[MXCFEB-1:0] 		rd_list_cfeb;		// List of CFEBs to read out
 	input	[MXCFEBB-1:0]		rd_ncfebs;			// Number of CFEBs in feb_list (4 or 5 depending on CSC type)
 	input	[RAM_ADRB-1:0]		rd_fifo_adr;		// RAM address at pre-trig, must be valid 1bx before rd_start
+
+// CFEB Blockedbits Readout Control
+	input						rd_start_bcb;		// Start readout sequence
+	input						rd_abort_bcb;		// Cancel readout
+	input	[MXCFEB-1:0] 		rd_list_bcb;		// List of CFEBs to read out
+	input	[MXCFEBB-1:0]		rd_ncfebs_bcb;		// Number of CFEBs in bcb_list (0 to 5)
 
 // RPC Sequencer Readout Control
 	input						rd_start_rpc;		// Start readout sequence
@@ -279,6 +332,13 @@
 	output	[7:0]				cfeb_rawhits;		// Layer data from FIFO
 	output						cfeb_fifo_busy;		// Readout busy sending data to sequencer, goes down 1bx early
 
+// CFEB Blockedbits Frame Output
+	output						bcb_first_frame;	// First frame valid 2bx after rd_start
+	output						bcb_last_frame;		// Last frame valid 1bx after busy goes down
+	output	[11:0]				bcb_blkbits;		// CFEB blocked bits frame data
+	output	[MXCFEBB-1:0]		bcb_cfeb_adr;		// CFEB ID	
+	output						bcb_fifo_busy;		// Readout busy sending data to sequencer, goes down 1bx early
+
 // RPC Sequencer Frame Output
 	output						rpc_first_frame;	// First frame valid 2bx after rd_start
 	output						rpc_last_frame;		// Last frame valid 1bx after busy goes down
@@ -297,6 +357,7 @@
 `ifdef DEBUG_BUFFER_READ_CTRL
 	input					fifo_wen;
 	output	[63:0]			read_csm_dsp;
+	output	[63:0]			read_bcb_dsp;
 	output	[63:0] 			read_rsm_dsp;
 	output	[63:0] 			read_msm_dsp;
 
@@ -317,6 +378,20 @@
 	output					cfeb_cnt_clr;
 	output					cfeb_tbin_cnt_clr;
 	output					cfeb_layer_cnt_clr;
+
+	output	[MXCFEBB-1:0]	cfeb_cnt_bcb;
+	output	[MXDS*MXLY-1:0]	cfeb_blockedbits;
+	output	[2:0]			cfeb_slice_cnt_bcb;
+	output	[2:0]			cfeb_slice_last_bcb;
+	output	[MXCFEBB-1:0]	cfeb_sel_bcb;
+
+	output					bcb_done;
+	output					bcb_slice_done;
+	output					bcb_reset;
+	output					cfeb_cnt_bcb_clr;
+	output					cfeb_slice_cnt_bcb_clr;
+	output					bcb_data_valid;
+	output					rd_bcb_busy;
 
 	output					rpc_done;
 	output					rpc_tbin_done;
@@ -353,15 +428,15 @@
 	wire csm_reset = (ttc_resync || rd_abort_cfeb);
 
 	always @(posedge clock) begin
-	if(csm_reset) 
+	if (csm_reset) 
 		read_csm = csm_idle;
 	else begin
 	case (read_csm)
 	csm_idle:
-		if(rd_start_cfeb)
+		if (rd_start_cfeb)
 		read_csm = csm_read;
 	csm_read:
-		if(cfeb_done)
+		if (cfeb_done)
 		read_csm = csm_idle;
 	default
 		read_csm = csm_idle;
@@ -445,9 +520,9 @@
 	end
 
 // Construct outgoing RAM read-address and layer mux select, RAM access takes 1bx
-	reg [RAM_ADRB-1:0]	fifo_radr_cfeb=0;
-	reg [2:0]			fifo_sel_cfeb_s0=0;
-	reg [2:0]			fifo_sel_cfeb=0;
+	reg [RAM_ADRB-1:0]	fifo_radr_cfeb   = 0;
+	reg [2:0]			fifo_sel_cfeb_s0 = 0;
+	reg [2:0]			fifo_sel_cfeb    = 0;
 
 	always @(posedge clock) begin
 	fifo_radr_cfeb		<= cfeb_tbin_cnt + first_read_adr_cfeb;	// FF buffer the add operation beco it has wide fanout
@@ -460,11 +535,11 @@
 
 	always @* begin
 	case (cfeb_sel_dly)
-	0:		cfeb_rawhits <= fifo0_rdata_cfeb;
-	1:		cfeb_rawhits <= fifo1_rdata_cfeb;
-	2:		cfeb_rawhits <= fifo2_rdata_cfeb;
-	3:		cfeb_rawhits <= fifo3_rdata_cfeb;
-	4:		cfeb_rawhits <= fifo4_rdata_cfeb;
+	3'h0:	cfeb_rawhits <= fifo0_rdata_cfeb;
+	3'h1:	cfeb_rawhits <= fifo1_rdata_cfeb;
+	3'h2:	cfeb_rawhits <= fifo2_rdata_cfeb;
+	3'h3:	cfeb_rawhits <= fifo3_rdata_cfeb;
+	3'h4:	cfeb_rawhits <= fifo4_rdata_cfeb;
 	default	cfeb_rawhits <= fifo0_rdata_cfeb;
 	endcase
 	end
@@ -496,6 +571,140 @@
 	assign cfeb_fifo_busy = cfeb_busy_fast; 
 
 //------------------------------------------------------------------------------------------------------------------
+// CFEB Blockebits Read Section:
+//------------------------------------------------------------------------------------------------------------------
+// Counter done flags
+	wire bcb_done;
+	wire bcb_slice_done;
+
+// CFEB Blockedbits Read State Machine
+	reg	[1:0] read_bcb;			// synthesis attribute safe_implementation of read_bcb is "yes";
+	parameter bcb_idle	=	0;	// Waiting for start_read
+	parameter bcb_read	=	1;	// Raw hits readout in progress
+
+	initial read_bcb = bcb_idle;
+	
+	wire bcb_reset = (ttc_resync || rd_abort_bcb);
+
+	always @(posedge clock) begin
+	if (bcb_reset) 
+		read_bcb <= bcb_idle;
+	else begin
+	case (read_bcb)
+	bcb_idle:
+		if (rd_start_bcb)
+		read_bcb <= bcb_read;
+	bcb_read:
+		if (bcb_done)
+		read_bcb <= bcb_idle;
+	default
+		read_bcb <= bcb_idle;
+	endcase
+	end
+	end
+
+// CFEB read-address counter, sequencer should not issue a read start if rd_ncfebs_bcb = 0
+	reg [MXCFEBB-1:0] cfeb_cnt_bcb=0;
+
+	wire cfeb_cnt_bcb_clr = bcb_done || (read_bcb != bcb_read);
+
+	always @(posedge clock) begin
+	if		(cfeb_cnt_bcb_clr) cfeb_cnt_bcb <= 0;
+	else if (bcb_slice_done  ) cfeb_cnt_bcb <= cfeb_cnt_bcb+1;
+	end
+
+	assign bcb_done = ((cfeb_cnt_bcb == (rd_ncfebs_bcb-1)) || (rd_ncfebs_bcb == 0)) && bcb_slice_done;
+	
+// Readout slice counter points to slices 0-3 for packed blockedbits data
+	reg  [2:0] cfeb_slice_cnt_bcb=0;
+	wire [2:0] cfeb_slice_last_bcb;
+
+	wire cfeb_slice_cnt_bcb_clr = bcb_slice_done || (read_bcb != bcb_read) && !rd_start_bcb; // accelerate startup with rd_start
+
+	always @(posedge clock) begin
+	if (cfeb_slice_cnt_bcb_clr) cfeb_slice_cnt_bcb = 0;
+	else                        cfeb_slice_cnt_bcb = cfeb_slice_cnt_bcb+1;
+	end
+
+	assign cfeb_slice_last_bcb = 4-1;
+	assign bcb_slice_done = (cfeb_slice_cnt_bcb == cfeb_slice_last_bcb);
+
+// Readout sequence map selects CFEB order according to CFEB enabled list, ie 11111 reads out CFEB0,1,2,3,4 and 00001 reads CFEB0 
+	reg  [MXCFEBB-1:0] cfebptr_bcb [MXCFEB-1:0];
+	wire [MXCFEBB-1:0] cfeb_sel_bcb;
+
+	integer ip;
+	integer np;
+
+	always @* begin
+	ip=0;
+	np=0;
+	while (ip<=MXCFEB-1) begin
+	cfebptr_bcb[ip]=0;
+	if (rd_list_bcb[ip]) begin
+	 cfebptr_bcb[np]=ip;
+	 np=np+1;
+	 end
+	 ip=ip+1;
+	end
+	end
+
+	assign cfeb_sel_bcb = cfebptr_bcb[cfeb_cnt_bcb];
+
+// Block frame data when not reading out
+	wire   bcb_data_valid  = bcb_fifo_busy;
+
+// Multiplex incoming RAM data from 5 CFEBs
+	reg	[MXDS*MXLY-1:0] cfeb_blockedbits;
+
+	always @* begin
+	if (bcb_data_valid) begin
+	case (cfeb_sel_bcb)
+	3'h0:	cfeb_blockedbits <= cfeb0_blockedbits;
+	3'h1:	cfeb_blockedbits <= cfeb1_blockedbits;
+	3'h2:	cfeb_blockedbits <= cfeb2_blockedbits;
+	3'h3:	cfeb_blockedbits <= cfeb3_blockedbits;
+	3'h4:	cfeb_blockedbits <= cfeb4_blockedbits;
+	default	cfeb_blockedbits <= cfeb0_blockedbits;
+	endcase
+	end 
+	else	cfeb_blockedbits <= 12'hBEF;
+	end
+
+// Divide blocked bits into 4 banks for sequential readout
+	wire [15:0] cfeb_blockedbits_slice[3:0];
+
+	assign cfeb_blockedbits_slice[0] = {3'h0, cfeb_blockedbits[11: 0]};
+	assign cfeb_blockedbits_slice[1] = {3'h1, cfeb_blockedbits[23:12]};
+	assign cfeb_blockedbits_slice[2] = {3'h2, cfeb_blockedbits[35:24]};
+	assign cfeb_blockedbits_slice[3] = {3'h3, cfeb_blockedbits[47:36]};
+
+// Point to slice within 1 CFEB array
+	reg [11:0]	      bcb_blkbits  = 0;
+	reg [MXCFEBB-1:0] bcb_cfeb_adr = 0;
+
+	always @(posedge clock) begin
+	if (bcb_reset) begin
+	bcb_blkbits  <= 12'hFED;
+	bcb_cfeb_adr <= 3'h3;
+	end
+	else begin
+	bcb_blkbits  <= cfeb_blockedbits_slice[cfeb_slice_cnt_bcb];
+	bcb_cfeb_adr <= cfeb_cnt_bcb;
+	end
+	end
+
+// Accelerate busy out to go high when rd_start arrives, then go low 1bx before end of readout
+	wire bcb_last_frame;
+
+	wire   rd_bcb_busy   = (read_bcb == bcb_read);
+	assign bcb_fifo_busy = rd_start_bcb || rd_bcb_busy;
+
+// First frame valid 1bx after rd_start, last frame 1bx after busy goes down
+	srl16e_bbl #(1) usrlbcb0 (.clock(clock),.ce(1'b1),.adr(dly0),.d(rd_start_bcb),.q(bcb_first_frame));
+	srl16e_bbl #(1) usrlbcb1 (.clock(clock),.ce(1'b1),.adr(dly0),.d(bcb_done    ),.q(bcb_last_frame ));
+
+//------------------------------------------------------------------------------------------------------------------
 // RPC FIFO Read Section:
 //------------------------------------------------------------------------------------------------------------------
 // Counter done flags
@@ -513,15 +722,15 @@
 	wire rsm_reset = (ttc_resync || rd_abort_rpc);
 
 	always @(posedge clock) begin
-	if(rsm_reset) 
+	if (rsm_reset) 
 		read_rsm = rsm_idle;
 	else begin
 	case (read_rsm)
 	rsm_idle:
-		if(rd_start_rpc)
+		if (rd_start_rpc)
 		read_rsm = rsm_read;
 	rsm_read:
-		if(rpc_done)
+		if (rpc_done)
 		read_rsm = rsm_idle;
 	default
 		read_rsm = rsm_idle;
@@ -596,16 +805,16 @@
 	wire [MXRPCB-1:0] rpc_sel_dly = rpc_sel_ff[1];
 
 // Calculate first RAM read address, arithmetic is pipelined, but values are really static 
-	reg	[RAM_ADRB-1:0] first_read_adr_rpc;
+	reg	[RAM_ADRB-1:0] first_read_adr_rpc=0;
 
 	always @(posedge clock) begin
 	first_read_adr_rpc	<=	rd_fifo_adr-fifo_pretrig_rpc-rd_rpc_offset-READ_ADR_OFFSET_RPC;
 	end
 
 // Construct outgoing RAM read-address and slice mux select, RAM access takes 1bx
-	reg [RAM_ADRB-1:0]	fifo_radr_rpc=0;
-	reg [0:0]			fifo_sel_rpc_s0=0;
-	reg [0:0]			fifo_sel_rpc=0;
+	reg [RAM_ADRB-1:0]	fifo_radr_rpc   = 0;
+	reg [0:0]			fifo_sel_rpc_s0 = 0;
+	reg [0:0]			fifo_sel_rpc    = 0;
 
 	always @(posedge clock) begin
 	fifo_radr_rpc	<= rpc_tbin_cnt + first_read_adr_rpc;	// FF buffer the add operation beco it has wide fanout
@@ -636,8 +845,8 @@
 
 	always @* begin
 	case (rpc_sel_dly)
-	0:	{rpc_tbinbxn,rpc_rawhits} <= {bxn0_mux,fifo0_rdata_rpc[7:0]};
-	1:	{rpc_tbinbxn,rpc_rawhits} <= {bxn1_mux,fifo1_rdata_rpc[7:0]};
+	1'h0:	{rpc_tbinbxn,rpc_rawhits} <= {bxn0_mux,fifo0_rdata_rpc[7:0]};
+	1'h1:	{rpc_tbinbxn,rpc_rawhits} <= {bxn1_mux,fifo1_rdata_rpc[7:0]};
 	endcase
 	end
 
@@ -679,15 +888,15 @@
 	wire msm_reset = (ttc_resync || rd_abort_mini);
 
 	always @(posedge clock) begin
-	if(msm_reset) 
+	if (msm_reset) 
 		read_msm = msm_idle;
 	else begin
 	case (read_msm)
 	msm_idle:
-		if(rd_start_mini)
+		if (rd_start_mini)
 		read_msm = msm_read;
 	msm_read:
-		if(mini_done)
+		if (mini_done)
 		read_msm = msm_idle;
 	default
 		read_msm = msm_idle;
@@ -711,7 +920,7 @@
 	assign mini_done      = mini_tbin_done;			// miniscope has no ram mux
 
 // Calculate first RAM read address, arithmetic is pipelined, but values are really static 
-	reg	[RAM_ADRB-1:0] first_read_adr_mini;
+	reg	[RAM_ADRB-1:0] first_read_adr_mini=0;
 
 	always @(posedge clock) begin
 	first_read_adr_mini	<=	rd_fifo_adr-fifo_pretrig_mini-rd_mini_offset-READ_ADR_OFFSET_MINI;
@@ -746,9 +955,8 @@
 	assign fifo_rdata_mini_mux	= (insert_word_mini) ? first_word_mini : fifo_rdata_mini;
 
 // Block miniscope data when not reading out
-	wire mini_data_valid = mini_fifo_busy || mini_last_frame;
-	
-	assign mini_rdata = (mini_data_valid) ? fifo_rdata_mini_mux : 16'hBEEF;
+	wire   mini_data_valid = mini_fifo_busy || mini_last_frame;
+	assign mini_rdata      = (mini_data_valid) ? fifo_rdata_mini_mux : 16'hBEEF;
 
 //-------------------------------------------------------------------------------------------------------------------
 // Debug Simulation state machine display
@@ -762,6 +970,17 @@
 	csm_idle:	read_csm_dsp <= "csm_idle";
 	csm_read:	read_csm_dsp <= "csm_read";
 	default		read_csm_dsp <= "csm_idle";
+	endcase
+	end
+
+// CFEB Blockedbits Read State Machine
+	reg[63:0] read_bcb_dsp;
+
+	always @* begin
+	case (read_bcb)
+	bcb_idle:	read_bcb_dsp <= "bcb_idle";
+	bcb_read:	read_bcb_dsp <= "bcb_read";
+	default		read_bcb_dsp <= "bcb_idle";
 	endcase
 	end
 

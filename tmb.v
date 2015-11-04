@@ -97,6 +97,13 @@
 //	09/04/09 Add bx0 mez test points
 //	09/09/09 Remove bx0 mez test points to save space, yeah it makes a difference
 //	09/16/09 Block lcts to  mpc outputs on sync error
+//	02/10/10 Add event clear for vme diagnostic registers
+//	02/12/10 Blank non-triggering status bits for triggering events
+//	02/26/10 Revert non-trigging blanking temporarily
+//	02/28/10 Fixed non-triggering status bits
+//	03/04/10 Fix clct|alct duplication for case where first clct|alct is dummy
+//	04/16/10 Fix kill logic for me1a
+//	06/22/10 Fix match window logic, was discarding clct_only events when >=2 clcts were in window
 //-------------------------------------------------------------------------------------------------------------------
 	module tmb
 	(
@@ -213,6 +220,7 @@
 	sync_err_blanks_mpc,
 
 // VME Status
+	event_clear_vme,
 	mpc0_frame0_vme,
 	mpc0_frame1_vme,
 	mpc1_frame0_vme,
@@ -502,6 +510,7 @@
 	input					sync_err_blanks_mpc;// Sync error blanks LCTs to MPC
 
 // VME Status
+	input					event_clear_vme;	// Event clear for aff,clct,mpc vme diagnostic registers
 	output	[MXFRAME-1:0]	mpc0_frame0_vme;	// MPC best muon 1st frame
 	output	[MXFRAME-1:0]	mpc0_frame1_vme;	// MPC best buon 2nd frame
 	output	[MXFRAME-1:0]	mpc1_frame0_vme;	// MPC second best muon 1st frame
@@ -700,7 +709,7 @@
 	wire [7:0]			vme_adr;
 
 //------------------------------------------------------------------------------------------------------------------
-// Startup timer to force mpc output high at power up, uses 2x clock for _mpc_tx async set
+// Startup timer to force mpc output high at power up
 //------------------------------------------------------------------------------------------------------------------
 	wire [3:0]	pdly = 1;			// Power-up reset delay
 	wire powerup_q;
@@ -739,11 +748,12 @@
 	srl16e_bbl #(MXALCT) ualct1 (.clock(clock),.ce(1'b1),.adr(alct_srl_adr),.d(alct1_tmb),.q(alct1_srl));
 	srl16e_bbl #(2)      ualcte (.clock(clock),.ce(1'b1),.adr(alct_srl_adr),.d(alcte_tmb),.q(alcte_srl));
 
-	wire alct_ptr_is_0 = (alct_delay == 0);				 	// Use direct input if SRL address is 0, 1st SRL output has 1bx overhead
+	wire alct_ptr_is_0 = (alct_delay == 0);						 	// Use direct input if SRL address is 0, 1st SRL output has 1bx overhead
 
 	assign alct0_pipe = (alct_ptr_is_0) ? alct0_tmb : alct0_srl;	// First  CLCT after clct pipe delay
 	assign alct1_pipe = (alct_ptr_is_0) ? alct1_tmb : alct1_srl;	// Second CLCT after clct pipe delay
 	assign alcte_pipe = (alct_ptr_is_0) ? alcte_tmb : alcte_srl;	// Second CLCT after clct pipe delay 
+
 	wire   alct0_pipe_vpf = alct0_pipe[0];
 	wire   alct1_pipe_vpf = alct1_pipe[0];
 
@@ -948,29 +958,41 @@
 	reg  [4:0] tmb_aff_list  = 0;
 	reg	 [3:0] tmb_match_win = 0;
 	reg	 [3:0] tmb_match_pri = 0;
-	wire [3:0] match_win;
 	wire alct_only_trig;
 
-	wire clct_keep		=((clct_match && tmb_allow_match) || (clct_noalct && tmb_allow_clct && !clct_noalct_lost));
-	wire alct_keep		= (clct_match && tmb_allow_match) || (alct_noclct && tmb_allow_alct);
+	wire clct_keep		=((clct_match && tmb_allow_match   ) || (clct_noalct &&  tmb_allow_clct    && !clct_noalct_lost));
+	wire alct_keep		= (clct_match && tmb_allow_match   ) || (alct_noclct &&  tmb_allow_alct);
 
-	wire clct_keep_ro	= (clct_match && tmb_allow_match_ro) || (clct_noalct && tmb_allow_clct_ro && !clct_noalct_lost);
-	wire alct_keep_ro	= (clct_match && tmb_allow_match_ro) || (alct_noclct && tmb_allow_alct_ro);
+	wire clct_keep_ro	= (clct_match && tmb_allow_match_ro) || (clct_noalct &&  tmb_allow_clct_ro && !clct_noalct_lost);
+	wire alct_keep_ro	= (clct_match && tmb_allow_match_ro) || (alct_noclct &&  tmb_allow_alct_ro);
 
-	wire clct_discard	= (clct_match && !tmb_allow_match) || (clct_noalct && !tmb_allow_clct) || clct_noalct_lost;
-	wire alct_discard	= alct_pulse && !alct_keep;
+	wire clct_discard	= (clct_match && !tmb_allow_match  ) || (clct_noalct && !tmb_allow_clct) || clct_noalct_lost;
+	wire alct_discard	=  alct_pulse && !alct_keep;
 
-	assign match_win	= (clct_keep || clct_keep_ro) ? clct_tag_win : clct_win_center;		// Default window position for alct-only events
-	assign clct_srl_ptr	= match_win;														// Pointer to SRL delayed CLCT signals
+// Match window mux
+	wire [3:0] match_win;
+	wire [3:0] match_win_mux;
 
+	wire clct_kept = (clct_keep || clct_keep_ro);
+
+	assign match_win_mux = (clct_noalct) ? winclosing    : clct_tag_win;	// if clct only, disregard priority and take last window position													// Pointer to SRL delayed CLCT signals
+	assign match_win     = (clct_kept  ) ? match_win_mux : clct_win_center;	// Default window position for alct-only events
+
+//!	assign match_win	= (clct_keep || clct_keep_ro) ? clct_tag_win : clct_win_center;		// Default window position for alct-only events
+	assign clct_srl_ptr	 = match_win;
+
+//	wire trig_pulse		= clct_match || clct_noalct || clct_noalct_lost || alct_noclct;		// Event pulse
+	wire trig_pulse		= clct_match || clct_noalct || clct_noalct_lost || alct_only_trig;	// Event pulse
 	
-//	wire trig_pulse		= clct_match || clct_noalct || alct_noclct || clct_noalct_lost;		// Event pulse
-	wire trig_pulse		= clct_match || clct_noalct || clct_noalct_lost || (alct_only_trig);// Event pulse
-	wire trig_keep		= (clct_keep || alct_keep);											// Keep event for trigger and readout
+	wire trig_keep		= (clct_keep    || alct_keep);										// Keep event for trigger and readout
 	wire non_trig_keep	= (clct_keep_ro || alct_keep_ro);									// Keep non-triggering event for readout only
 
 	wire alct_only		= (alct_noclct && tmb_allow_alct) && !clct_keep;					// An alct-only trigger
 	wire wr_push_mux	= (alct_only) ? trig_pulse : (wr_push_xtmb_pipe  && trig_pulse);	// Buffer write strobe at TMB matching time
+
+	wire clct_match_tr	= clct_match  && trig_keep;		// ALCT and CLCT matched in time, nontriggering event
+	wire alct_noclct_tr	= alct_noclct && trig_keep;		// Only ALCT triggered, nontriggering event
+	wire clct_noalct_tr	= clct_noalct && trig_keep;		// Only CLCT triggered, nontriggering event
 
 	wire clct_match_ro	= clct_match  && non_trig_keep;	// ALCT and CLCT matched in time, nontriggering event
 	wire alct_noclct_ro	= alct_noclct && non_trig_keep;	// Only ALCT triggered, nontriggering event
@@ -987,9 +1009,9 @@
 	reg	tmb_alct_only	 = 0;
 	reg	tmb_clct_only	 = 0;
 
-	reg	tmb_match_ro	 = 0;
-	reg	tmb_alct_only_ro = 0;
-	reg	tmb_clct_only_ro = 0;
+	reg	tmb_match_ro_ff	    = 0;
+	reg	tmb_alct_only_ro_ff = 0;
+	reg	tmb_clct_only_ro_ff = 0;
 
 	reg tmb_alct_discard = 0;
 	reg tmb_clct_discard = 0;
@@ -1004,13 +1026,13 @@
 	tmb_trig_keep_ff	<= trig_keep;							// ALCT or CLCT or both triggered, and trigger is allowed
 	tmb_non_trig_keep_ff<= non_trig_keep;						// Event did not trigger but is kept for readout
 
-	tmb_match			<= clct_match	  && tmb_allow_match;	// ALCT and CLCT matched in time
-	tmb_alct_only		<= alct_noclct	  && tmb_allow_alct;	// Only ALCT triggered
-	tmb_clct_only		<= clct_noalct	  && tmb_allow_clct;	// Only CLCT triggered
+	tmb_match			<= clct_match_tr  && tmb_allow_match;	// ALCT and CLCT matched in time
+	tmb_alct_only		<= alct_noclct_tr && tmb_allow_alct;	// Only ALCT triggered
+	tmb_clct_only		<= clct_noalct_tr && tmb_allow_clct;	// Only CLCT triggered
 
-	tmb_match_ro		<= clct_match_ro  && tmb_allow_match_ro;// ALCT and CLCT matched in time, nontriggering event
-	tmb_alct_only_ro	<= alct_noclct_ro && tmb_allow_alct_ro;	// Only ALCT triggered, nontriggering event
-	tmb_clct_only_ro	<= clct_noalct_ro && tmb_allow_clct_ro;	// Only CLCT triggered, nontriggering event
+	tmb_match_ro_ff		<= clct_match_ro  && tmb_allow_match_ro;// ALCT and CLCT matched in time, nontriggering event
+	tmb_alct_only_ro_ff	<= alct_noclct_ro && tmb_allow_alct_ro;	// Only ALCT triggered, nontriggering event
+	tmb_clct_only_ro_ff	<= clct_noalct_ro && tmb_allow_clct_ro;	// Only CLCT triggered, nontriggering event
 
 	tmb_match_win		<= match_win;							// Location of alct in clct window
 	tmb_match_pri		<= clct_pri_best;						// Priority of clct that matched
@@ -1026,13 +1048,17 @@
 
 	wr_adr_rtmb   		<= wr_adr_xtmb_pipe;					// Buffer write address at TMB matching time, continuous
 	wr_push_rtmb  		<= wr_push_mux;							// Buffer write strobe at TMB matching time
-//	wr_avail_rtmb 		<= wr_avail_xtmb_pipe && trig_pulse;	// Buffer available at TMB matching time
 	wr_avail_rtmb 		<= wr_avail_xtmb_pipe;					// Buffer available at TMB matching time
 	end
 
-// Post FF mod trig_keep for me1a
+// Had to wait for kill signal to go valid
 	wire kill_trig;
 
+	assign tmb_match_ro     = tmb_match_ro_ff     & kill_trig;	// ALCT and CLCT matched in time, nontriggering event
+	assign tmb_alct_only_ro = tmb_alct_only_ro_ff & kill_trig;	// Only ALCT triggered, nontriggering event
+	assign tmb_clct_only_ro = tmb_clct_only_ro_ff & kill_trig;	// Only CLCT triggered, nontriggering event
+
+// Post FF mod trig_keep for me1a
 	assign tmb_trig_keep     = tmb_trig_keep_ff && (!kill_trig || tmb_alct_only);
 	assign tmb_non_trig_keep = tmb_non_trig_keep_ff && !tmb_trig_keep;
 	
@@ -1119,17 +1145,35 @@
 	wire	tmb_dupe_alct = tmb_one_alct && tmb_two_clct;						// Duplicate alct if there are 2 clcts
 	wire	tmb_dupe_clct = tmb_one_clct && tmb_two_alct;						// Duplicate clct if there are 2 alcts
 
-	wire	[MXALCT-1:0]	alct_dummy = clct_bxn_insert[1:0] << 11;			// Insert clct bxn for clct-only events
-	wire	[MXCLCT-1:0]	clct_dummy = 0;										// Blank  clct for alct-only events
-	wire	[MXCLCTC-1:0]	clctc_dummy= 0;										// Blank  clct common for alct-only events
+// Duplicate alct and clct
+	reg  [MXALCT-1:0]  alct0;
+	reg  [MXALCT-1:0]  alct1;
+	wire [MXALCT-1:0]  alct_dummy;
 
-	wire	[MXALCT-1:0]	alct0 = (tmb_no_alct  ) ? alct_dummy : alct0_real;	// Substitute dummy alct if no alct
-	wire 	[MXALCT-1:0]	alct1 = (tmb_dupe_alct) ? alct0_real : alct1_real;	// Duplicate alct0 if 2 clcts and 1 alct
+	reg  [MXCLCT-1:0]  clct0;
+	reg  [MXCLCT-1:0]  clct1;
+	wire [MXCLCT-1:0]  clct_dummy;
+	
+	reg  [MXCLCTC-1:0] clctc;
+	wire [MXCLCTC-1:0] clctc_dummy;
 
-	wire	[MXCLCT-1:0]	clct0 = (tmb_no_clct  ) ? clct_dummy : clct0_real;	// Substitute dummy clct if no clct
-	wire	[MXCLCT-1:0]	clct1 = (tmb_dupe_clct) ? clct0_real : clct1_real;	// Duplicate clct0 if 2 alcts and 1 clct
-	wire	[MXCLCTC-1:0]	clctc = (tmb_no_clct  ) ? clctc_dummy: clctc_real;	// Substitute dummy clct common if no clct
+	assign alct_dummy  = clct_bxn_insert[1:0] << 11;			// Insert clct bxn for clct-only events
+	assign clct_dummy  = 0;										// Blank  clct for alct-only events
+	assign clctc_dummy = 0;										// Blank  clct common for alct-only events
 
+	always @* begin
+	if      (tmb_no_clct  ) begin clct0 <= clct_dummy; clct1 <= clct_dummy; clctc <= clctc_dummy; end // clct0 and clct1 do not exist, use dummy clct	
+	else if (tmb_dupe_clct) begin clct0 <= clct0_real; clct1 <= clct0_real; clctc <= clctc_real;  end // clct0 exists, but clct1 does not exist, copy clct0 into clct1
+	else                    begin clct0 <= clct0_real; clct1 <= clct1_real; clctc <= clctc_real;  end // clct0 and clct1 exist, so use them
+	end
+
+	always @* begin
+	if      (tmb_no_alct  ) begin alct0 <= alct_dummy; alct1 <= alct_dummy; end // alct0 and alct1 do not exist, use dummy alct
+	else if (tmb_dupe_alct) begin alct0 <= alct0_real; alct1 <= alct0_real; end // alct0 exists, but alct1 does not exist, copy alct0 into alct1
+	else                    begin alct0 <= alct0_real; alct1 <= alct1_real; end // alct0 and alct1 exist, so use them
+	end
+
+// LCT valid pattern flags
 	wire lct0_vpf	= alct0_vpf || clct0_vpf;			// First muon exists
 	wire lct1_vpf	= alct1_vpf || clct1_vpf;			// Second muon exists
 
@@ -1357,7 +1401,11 @@
 
 // Latch MPC output words for VME
 	always @(posedge clock) begin
-	if(trig_mpc_rtmb_dly) begin
+	if (event_clear_vme) begin
+	{mpc1_frame0_vme,mpc0_frame0_vme} <= 0;
+	{mpc1_frame1_vme,mpc0_frame1_vme} <= 0;
+	end
+	else if (trig_mpc_rtmb_dly) begin
 	{mpc1_frame0_vme,mpc0_frame0_vme} <= mpc_frame0_dly;	// Latched copy of LCTs for VME
 	{mpc1_frame1_vme,mpc0_frame1_vme} <= mpc_frame1_dly;
 	end
@@ -1384,7 +1432,7 @@
 //------------------------------------------------------------------------------------------------------------------
 // MPC Injector State Machine Declarations
 //------------------------------------------------------------------------------------------------------------------
-	reg		[3:0]	mpc_sm;			// synthesis attribute safe_implementation of mpc_sm is "yes";
+	reg [3:0]		mpc_sm;			// synthesis attribute safe_implementation of mpc_sm is "yes";
 	parameter 		pass		=	0;
 	parameter		start		=	1;
 	parameter 		injecting	=	2;
@@ -1524,12 +1572,12 @@
 	wire	[1:0]	_mpc_rx_2nd;
 
 	x_demux_ddr #(MXMPCRX) umpcdemux (	// must use ddr and not ddr2 beco we can't shift mpc rx data a half cycle
-		.din		(_mpc_rx[1:0]),
-		.clock		(clock),
-		.aset		(powerup_n),
-		.aclr		(1'b0),
-		.dout1st	(_mpc_rx_1st[1:0]),
-		.dout2nd	(_mpc_rx_2nd[1:0]));
+	.din		(_mpc_rx[1:0]),
+	.clock		(clock),
+	.aset		(powerup_n),
+	.aclr		(1'b0),
+	.dout1st	(_mpc_rx_1st[1:0]),
+	.dout2nd	(_mpc_rx_2nd[1:0]));
 	
 // Map and un-invert demultiplexed signal names
 	wire [1:0] mpc_accept;
@@ -1578,8 +1626,8 @@
 	end
 
 // Latch MPC response for VME readout
-	reg	[1:0]	mpc_accept_vme;
-	reg	[1:0]	mpc_reserved_vme;
+	reg [1:0] mpc_accept_vme;
+	reg [1:0] mpc_reserved_vme;
 
 	always @(posedge clock) begin
 	if(mpc_response) begin

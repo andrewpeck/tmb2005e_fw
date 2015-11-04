@@ -115,6 +115,8 @@
 // 09/14/09 Add ecc rx tx error outputs to sync err module
 // 10/14/09 Add error counter for 2-identical alct muons
 // 10/15/09 Add ff pipe for alct structure errors
+// 02/26/10 Add event clear for alct vme diagnostic registers
+// 06/30/10 Mod injector RAM for alct and l1a bits
 //-----------------------------------------------------------------------------------------------------------------
 	module alct
 	(
@@ -175,6 +177,7 @@
 	alct_txd_int_delay,
 	alct_clock_en_vme,
 	alct_seq_cmd,
+	event_clear_vme,
 	alct0_vme,
 	alct1_vme,
 	bxn_alct_vme,
@@ -214,8 +217,13 @@
 	alct_clear,
 	alct_inject,
 	alct_inj_delay,
+	alct_inj_ram_en,
 	alct0_inj,
 	alct1_inj,
+	alct0_inj_ram,
+	alct1_inj_ram,
+	alctb_inj_ram,
+	inj_ramout_busy,
 
 // Trigger/Readout Counter Ports
 	cnt_all_reset,
@@ -350,6 +358,7 @@
 	input	[3:0]			alct_txd_int_delay;		// ALCT data transmit delay, integer bx
 	input					alct_clock_en_vme;		// Enable ALCT 40MHz clock
 	input	[3:0]			alct_seq_cmd;			// ALCT Sequencer command
+	input					event_clear_vme;		// Event clear for aff,alct,clct,mpc vme diagnostic registers
 	output	[15:0]			alct0_vme;				// Latched 1st best muon on last valid pattern
 	output	[15:0]			alct1_vme;				// Latched 2nd best muon on last valid pattern
 	output	[4:0]			bxn_alct_vme;			// ALCT bxn on last alct valid pattern flag
@@ -389,9 +398,14 @@
 	input					cfg_alct_ext_inject;	// 1=Assert alct_ext_inject
 	input					alct_clear;				// 1=Blank received data
 	input					alct_inject;			// 1=Start ALCT injector
+	input					alct_inj_ram_en;		// 1=Link  ALCT injector to CFEB injector RAM
 	input	[4:0]			alct_inj_delay;			// Injector delay
 	input	[15:0]			alct0_inj;				// Injected ALCT0
 	input	[15:0]			alct1_inj;				// Injected ALCT1
+	input	[10:0]			alct0_inj_ram;			// Injector RAM ALCT0
+	input	[10:0]			alct1_inj_ram;			// Injector RAM ALCT1
+	input	[4:0]			alctb_inj_ram;			// Injector RAM ALCT bxn
+	input					inj_ramout_busy;		// Injector RAM busy
 
 // Trigger/Readout Counter Ports
 	input					cnt_all_reset;			// Trigger/Readout counter reset
@@ -542,16 +556,12 @@
 //		Output Raw hits to Sequencer
 //-----------------------------------------------------------------------------------------------------------------
 //	Buffer control signals
-	reg			alct_clear_ff	= 0;
-	reg			alct_inject_ff	= 0;
-	reg	[15:0]	alct0_inj_ff	= 0;
-	reg	[15:0]	alct1_inj_ff	= 0;
+	reg alct_clear_ff  = 0;
+	reg alct_inject_ff = 0;
 
 	always @(posedge clock) begin
-	alct_clear_ff		<= alct_clear;
-	alct_inject_ff		<= alct_inject;
-	alct0_inj_ff		<= alct0_inj;
-	alct1_inj_ff		<= alct1_inj;
+	alct_clear_ff  <= alct_clear;
+	alct_inject_ff <= alct_inject;
 	end
 
 // Latch 80 MHz multiplexed inputs in DDR IOB FFs, 80MHz 1st in time is aligned with 40MHz falling edge
@@ -1013,6 +1023,20 @@
 	assign	scp_alct_rx[54:51]	= reserved_out[3:0];
 	assign	scp_alct_rx[55]		= cfg_done;
 
+// Select injector ALCTs from VME or from CFEB injector RAM
+	reg	[15:0]	alct0_inj_ff = 0;
+	reg	[15:0]	alct1_inj_ff = 0;
+
+	wire [15:0] alct0_inj_ramfull = {alctb_inj_ram[4:0],alct0_inj_ram[10:0]};
+	wire [15:0] alct1_inj_ramfull = {alctb_inj_ram[4:0],alct1_inj_ram[10:0]};
+
+	always @(posedge clock) begin
+	alct0_inj_ff <= (alct_inj_ram_en) ? alct0_inj_ramfull : alct0_inj;
+	alct1_inj_ff <= (alct_inj_ram_en) ? alct1_inj_ramfull : alct1_inj;
+	end
+
+	wire inj_ram_now = alct_inj_ram_en & inj_ramout_busy;
+
 // Merge ALCT with injector, blank alct when in sync mode
 	wire [MXALCT-1:0] alct0_rx;
 	wire [MXALCT-1:0] alct1_rx;
@@ -1038,7 +1062,7 @@
 	reg [4:0] bxn_alct_vme=0;
 
 	always @(posedge clock) begin
-	if(alct0_mux[0])						// alct_1st_valid
+	if(alct0_valid)							// alct_1st_valid
 	bxn_alct_vme[4:0] <= alct0_mux[15:11];	// bxn[4:0]
 	end
 
@@ -1070,7 +1094,11 @@
 	reg [15:0] alct1_vme = 0;
 
 	always @(posedge clock) begin
-	if (alct0_mux[0]) begin
+	if (event_clear_vme) begin
+	alct0_vme <= 0;
+	alct1_vme <= 0;
+	end
+	else if (alct0_valid) begin
 	alct0_vme <= alct0_mux;
 	alct1_vme <= alct1_mux;
 	end
@@ -1164,7 +1192,7 @@
 
 // Pass state FF delays output mux 1 cycle
 	always @(posedge clock) begin
-	pass_ff <= inj_sm != injecting;
+	pass_ff <= (inj_sm != injecting) || inj_ram_now;
 	end
 
 //-----------------------------------------------------------------------------------------------------------------
