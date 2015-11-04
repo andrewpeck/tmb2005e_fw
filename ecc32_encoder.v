@@ -3,6 +3,7 @@
 // 	ECC 32-data/7-parity Encoder
 //	02/19/09	Initial copied from Xilinx xapp645 top_32b_EDC.v
 //	02/23/09	Removed FFs + reorganized into separate ecoder/decoder sections
+//	07/26/10	Port to ise 12
 //-------------------------------------------------------------------------------------------------------------------
 	module ecc32_encoder (
 	enc_in,

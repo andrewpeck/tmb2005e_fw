@@ -4,6 +4,7 @@
 //	02/19/09	Initial copied from Xilinx xapp645 top_32b_EDC.v
 //	02/23/09	Removed FFs + reorganized into ecoder/decoder sections
 //	03/02/09	Add enable
+//	07/26/10	Port to ise 12
 //-------------------------------------------------------------------------------------------------------------------
 	module ecc32_decoder (
 	dec_in,

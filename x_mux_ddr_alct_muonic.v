@@ -1,7 +1,102 @@
+`include "firmware_version.v"
+
+`ifdef VIRTEX6
 `timescale 1ns / 1ps
 //-------------------------------------------------------------------------------------------------------------------
-// 2-to-1 Multiplexer converts 40MHz data to 80MHz
-//
+// Virtex6: 2-to-1 Multiplexer converts 40MHz data to 80MHz
+//-------------------------------------------------------------------------------------------------------------------
+//	07/14/10 Port to ise 12
+//	07/14/10 Remove hold FF, its now in the ODDR prim same_edge mode
+//	11/30/10 Add virtex2|6 selection
+//-------------------------------------------------------------------------------------------------------------------
+	module x_mux_ddr_alct_muonic
+	(
+	clock,
+	clock_lac,
+	clock_2x,
+	clock_iob,
+	clock_en,
+	posneg,
+	clr,
+	din1st,
+	din2nd,
+	dout
+	);
+
+// Generic
+	parameter WIDTH = 8;
+	initial	$display("x_mux_ddr_alct_muonic: WIDTH=%d",WIDTH);
+
+// Ports
+	input				clock;				// 40MHz TMB main clock
+	input				clock_lac;			// 40MHz logic accessible clock
+	input				clock_2x;			// 80MHz commutator clock
+	input				clock_iob;			// ALCT rx  40 MHz clock
+	input				clock_en;			// Clock enable
+	input				posneg;				// Select inter-stage clock 0 or 180 degrees
+	input				clr;				// Sync clear
+	input	[WIDTH-1:0]	din1st;				// Input data 1st-in-time
+	input	[WIDTH-1:0]	din2nd;				// Input data 2nd-in-time
+	output	[WIDTH-1:0]	dout;				// Output data multiplexed 2-to-1
+
+// Latch fpga fabric inputs in main clock time domain
+	reg  [2*WIDTH-1:0] din_ff = 0;
+	wire [2*WIDTH-1:0] din;
+
+	assign din = {din2nd,din1st};
+
+	always @(posedge clock) begin
+	din_ff <= din;
+	end
+
+// Interstage clock latches on rising or falling edge of main clock using clock_2x 
+	reg	isen=0;
+
+	always @(posedge clock_2x)begin
+	isen <= clock_lac ^ posneg;
+	end
+
+// Latch fpga fabric inputs in an inter-stage time domain
+	reg  [2*WIDTH-1:0] din_is_ff = 0;
+	wire [WIDTH-1:0]   din1st_iobff;
+	wire [WIDTH-1:0]   din2nd_iobff;
+
+	always @(posedge clock_2x) begin
+	if (isen) din_is_ff <= din_ff;
+	end
+
+	assign din1st_iobff = din_is_ff[WIDTH-1:0];
+	assign din2nd_iobff = din_is_ff[2*WIDTH-1:WIDTH];
+
+// Generate array of output IOB DDRs, xst can not infer ddr outputs, alas
+	genvar i;
+	generate
+	for (i=0; i<=WIDTH-1; i=i+1) begin: ddr_gen
+	ODDR #(
+	.DDR_CLK_EDGE ("SAME_EDGE"),	// "OPPOSITE_EDGE" or "SAME_EDGE" 
+	.INIT         (1'b0),			// Initial value of Q: 1'b0 or 1'b1
+	.SRTYPE       ("SYNC")			// Set/Reset type: "SYNC" or "ASYNC" 
+	) u0 (
+	.C	(clock_iob),				// 1-bit clock input
+	.CE	(clock_en),					// 1-bit clock enable input
+	.S	(1'b0),						// 1-bit set
+	.R	(clr),						// 1-bit reset
+	.D1	(din1st_iobff[i]),			// 1-bit data input (positive edge)
+	.D2	(din2nd_iobff[i]),			// 1-bit data input (negative edge)
+	.Q	(dout[i]));					// 1-bit DDR output
+	end
+	endgenerate
+
+//-------------------------------------------------------------------------------------------------------------------
+	endmodule
+//-------------------------------------------------------------------------------------------------------------------
+
+
+`elsif VIRTEX2
+`timescale 1ns / 1ps
+//-------------------------------------------------------------------------------------------------------------------
+// Virtex2: 2-to-1 Multiplexer converts 40MHz data to 80MHz
+//-------------------------------------------------------------------------------------------------------------------
 //	12/03/01 Initial
 //	03/03/02 Replaced library FFs with behavioral FFs
 //	01/29/03 Added async set to blank /mpc output at startup
@@ -21,8 +116,9 @@
 //	06/15/09 Add 1st|2nd swap for digital phase shifter
 //	06/16/09 Remove digital phase shifter
 //	08/05/09 Move timing constraints to ucf, remove async clear, add sync clear to IOB ffs
+//	07/14/10 Mod default width for sim, add display
 //-------------------------------------------------------------------------------------------------------------------
-	module x_mux_ddr_muonic_alct
+	module x_mux_ddr_alct_muonic
 	(
 	clock,
 	clock_lac,
@@ -37,7 +133,8 @@
 	);
 
 // Generic
-	parameter WIDTH = 1;
+	parameter WIDTH = 8;
+	initial	$display("x_mux_ddr_alct_muonic: WIDTH=%d",WIDTH);
 
 // Ports
 	input				clock;				// 40MHz TMB main clock
@@ -106,3 +203,5 @@
 //-------------------------------------------------------------------------------------------------------------------
 	endmodule
 //-------------------------------------------------------------------------------------------------------------------
+
+`endif

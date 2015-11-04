@@ -9,6 +9,7 @@
 //	05/21/07 Rename cylon9 to cylon1 to distinguish from 2-eye, add rate
 //	08/11/09 Replace 10MHz clock_vme with  40MHz clock, increase prescale counter by 2 bits
 //	04/22/10 Port to ise 11, add FF to srl output to sync with gsr
+//	07/09/10 Port to ise 12
 //--------------------------------------------------------------------------------------------------------------
 	module cylon1 (clock,rate,q);
 
@@ -34,7 +35,7 @@
 	parameter MXPRE = 2;
 	`endif
 
-	reg	 [MXPRE-1:0] prescaler  = 0;
+	reg  [MXPRE-1:0] prescaler  = 0;
 	wire [MXPRE-1:0] full_scale = {MXPRE{1'b1}};
 
 	always @(posedge clock) begin

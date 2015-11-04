@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-//`define DEBUG_SCOPE 1
+//`define DEBUG_SCOPE     1		// Uncomment to enable debug io ports
 //--------------------------------------------------------------------------------------------------------------------
 //
 //	Logic Analyzer Module
@@ -35,6 +35,11 @@
 //	09/25/08 Mod counters to span 160 channels x 512 tbins =5120 frames, needing 13 bit counters
 //	09/30/08 Fix auto mode ram addressing
 //	04/24/09 Add recovery to state machine
+//	09/16/10 Port to ise 12
+//	09/29/10 Add virtex 6 ram option, requires firemware version include
+//	10/01/10 Move ram init file to isim test bench, swap ram ports to conform to virtex6 sdp
+//	10/05/10 Check non-blocking operators in sm, add read_first to dual port RAM
+//	11/18/10 Fix missed read first
 //--------------------------------------------------------------------------------------------------------------------
 // VME Scope Control Register
 //	[0]		RW	scp_runstop			Run/Stop 1=run 0=stop
@@ -100,13 +105,13 @@
 	,auto_bank_sel
 	,next_ch_bank
 	,auto_tbin_clr
-	,dob
+	,doa
 	,ch_ff
 
 	,predone
 	,trigger
 	,wrdone
-	,wea
+	,web
 `endif
 	);
 //--------------------------------------------------------------------------------------------------------------------
@@ -117,6 +122,16 @@
 	parameter	MXBANK		= 10;	// Number of 16bit RAM banks = 2x number of 32-bit RAMs
 	parameter	NPRESTORE	= 16;	// Prestore Time bins before trigger, must be a power of 2
 	parameter	NPRESTOREB	= 4;	// Prestore bits
+
+	initial	$display("scope160: MXCH      =%d",MXCH);
+	initial	$display("scope160: MXCHB     =%d",MXCHB);
+	initial	$display("scope160: MXBANK    =%d",MXBANK);
+	initial	$display("scope160: NPRESTORE =%d",NPRESTORE);
+	initial	$display("scope160: NPRESTOREB=%d",NPRESTOREB);
+
+	`include "firmware_version.v"
+	`ifdef VIRTEX2 initial $display ("scope160: VIRTEX2   =%H",`VIRTEX2); `endif	// Virtex 2 RAMs
+	`ifdef VIRTEX6 initial $display ("scope160: VIRTEX6   =%H",`VIRTEX6); `endif	// Virtex 6 RAMs
 
 //--------------------------------------------------------------------------------------------------------------------
 // Ports
@@ -168,13 +183,13 @@
 	output				next_ch_bank;
 	output				auto_tbin_clr;
 
-	output	[MXCH-1:0]	dob;
+	output	[MXCH-1:0]	doa;
 	output	[MXCH-1:0]	ch_ff;
 
 	output				predone;
 	output				trigger;
 	output				wrdone;
-	output				wea;
+	output				web;
 `endif
 
 //--------------------------------------------------------------------------------------------------------------------
@@ -199,11 +214,11 @@
 //--------------------------------------------------------------------------------------------------------------------
 // Register channel inputs, intermediate stage is for trigger mux, last stage is for RAMs
 //--------------------------------------------------------------------------------------------------------------------
-	reg	[MXCH-1:0]	ch_ff=0;
-	reg	[MXCH-1:0]	trig_src_ff=0;
+	reg	[MXCH-1:0]	ch_ff       = 0;
+	reg	[MXCH-1:0]	trig_src_ff = 0;
 
 	always @(posedge clock) begin
-	if(reset) begin
+	if (reset) begin
 	trig_src_ff	<= {MXCH{1'b1}};	// Init values to prevent always-0 warnings 
 	ch_ff		<= {MXCH{1'b1}};
 	end
@@ -242,14 +257,14 @@
 	wire wadr_cnt_en = (sm == prestore) ||(sm == wait_trig) || (sm == store);
 
 	always @(posedge clock) begin
-	if 		(sm == idle ) wadr <= 0;		// Sync reset
-	else if	(wadr_cnt_en) wadr <= wadr + 1;	// Sync count
+	if 		(sm == idle ) wadr <= 0;			// Sync reset
+	else if	(wadr_cnt_en) wadr <= wadr + 1'b1;	// Sync count
 	end
 
 	wire predone = wadr[NPRESTOREB] && (sm == prestore);
 
 // On trigger, latch current write address
-	reg [8:0] trig_adr=0;
+	reg  [8:0] trig_adr=0;
 
 	always @(posedge clock) begin
 	if (trigger) trig_adr <= wadr;
@@ -260,11 +275,11 @@
 
 	always @(posedge clock) begin
 	if		(sm == idle ) wr_cnt <= 0;
-	else if	(sm == store) wr_cnt <= wr_cnt+1;
+	else if	(sm == store) wr_cnt <= wr_cnt+1'b1;
 	end
 
 	wire wrdone = (wr_cnt == 511-NPRESTORE);
-	wire wea	= ((sm == prestore) || (sm == store) || (sm == wait_trig)) && !nowrite && power_up;
+	wire web	= ((sm == prestore) || (sm == store) || (sm == wait_trig)) && !nowrite && power_up;
 
 //--------------------------------------------------------------------------------------------------------------------
 // Sequencer auto mode
@@ -282,18 +297,20 @@
 	assign read_busy = auto_read;
 
 // Calculate number of RAM words to read out in auto mode
-	reg [8:0] auto_tbins=0;						// Number of tbins decoded from vme register
+	reg  [8:0] auto_tbins=0;					// Number of tbins decoded from vme register
+	wire [8:0] user_tbins = ((tbins+1)*64)-1;
 
 	always @(posedge clock) begin
 	if (!auto) auto_tbins <= 0;					// Suppress warnings for constant FFs
-	else       auto_tbins <= ((tbins+1)*64)-1;	// tbins=7 reads 512 tbins, ending in tbin 511
+	else       auto_tbins <= user_tbins;		// tbins=7 reads 512 tbins, ending in tbin 511
 	end
 
 // Point to 1st RAM address
-	reg [8:0] radr_offset=0;
+	reg  [8:0] radr_offset=0;
+	wire [8:0] prestore_offset = (NPRESTORE-1);
 
 	always @(posedge clock) begin
-	radr_offset <= trig_adr-(NPRESTORE-1);
+	radr_offset <= trig_adr-prestore_offset;
 	end
 
 // Increment channel block pointer after reading tbins
@@ -315,12 +332,12 @@
 
 	always @(posedge clock) begin
 	if (auto_tbin_clr) auto_tbin_cnt <= 0;
-	else			   auto_tbin_cnt <= auto_tbin_cnt+1;
+	else			   auto_tbin_cnt <= auto_tbin_cnt+1'b1;
 	end
 
 	always @(posedge clock) begin
 	if      (auto_bank_clr) auto_bank_sel <= 0;
-	else if (next_ch_bank ) auto_bank_sel <= auto_bank_sel+1;
+	else if (next_ch_bank ) auto_bank_sel <= auto_bank_sel+1'b1;
 	end
 
 	assign auto_radr = (nowrite) ? auto_tbin_cnt : auto_tbin_cnt+radr_offset;
@@ -331,7 +348,7 @@
 	wire [3:0]	ram_mux;
 	
 	always @(posedge clock) begin
-	radr_prestore[8:0] <= radr_vme-(NPRESTORE-1)+trig_adr;
+	radr_prestore[8:0] <= radr_vme-prestore_offset+trig_adr;
 	end
 
 	assign radr_mux[8:0]= (auto) ? auto_radr[8:0]     : radr_prestore[8:0];
@@ -345,8 +362,8 @@
 	end
 
 // Status signals
-	reg waiting=0;
-	reg trig_done=0;
+	reg waiting   = 0;
+	reg trig_done = 0;
 
 	always @(posedge clock) begin
 	waiting	  <= (sm == prestore) || (sm == wait_trig) ||	(sm == store);
@@ -367,86 +384,134 @@
 // Scope State Machine
 //--------------------------------------------------------------------------------------------------------------------
 	always @(posedge clock) begin
-	if		(reset)		sm = idle;
-	else if (!runstop)	sm = idle;
+	if		(reset)		sm <= idle;
+	else if (!runstop)	sm <= idle;
  
 	else begin
  	case (sm)
 
 	idle:
-	 if (runstop)	sm = prestore;
+	 if (runstop)	sm <= prestore;
 
 	prestore:
-	 if (predone)	sm = wait_trig;
+	 if (predone)	sm <= wait_trig;
 
 	wait_trig:
-	 if (trigger)	sm = store;
+	 if (trigger)	sm <= store;
 	
 	store:
-	 if (wrdone)	sm = readout;
+	 if (wrdone)	sm <= readout;
 
 	readout:
-	 if (auto_stop)	sm = idle;
+	 if (auto_stop)	sm <= idle;
 
-	default			sm = idle;
+	default			sm <= idle;
 	endcase
 	end
 	end
 
 //--------------------------------------------------------------------------------------------------------------------
-// Scope RAM: Port A scope write, no read. Port B VME read no write
+// Scope RAM: VME reads port A, scope writes port B
 //--------------------------------------------------------------------------------------------------------------------
-	wire [MXCH-1:0] dob;
-
+	wire [MXCH-1:0] doa;
 	genvar i;
+
+`ifdef VIRTEX2
+	initial $display("scope160: generating Virtex2 RAMB16_S36_S36");
 	generate
 	for (i=0; i<MXCH; i=i+32) begin: ram
-	RAMB16_S36_S36 #(
-	.WRITE_MODE_A			("WRITE_FIRST"),	// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.WRITE_MODE_B			("WRITE_FIRST"),	// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.SIM_COLLISION_CHECK	("GENERATE_X_ONLY")	// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
-	) uram (
-	.WEA	(wea),						// Port A Write Enable Input
-	.ENA	(1'b1),						// Port A RAM Enable Input
-	.SSRA	(1'b0),						// Port A Synchronous Set/Reset Input
-	.CLKA	(clock),					// Port A Clock
-	.ADDRA	(wadr[8:0]),				// Port A 9-bit Address Input
-	.DIA	(ch_ff[i+31:i]),			// Port A 32-bit Data Input
-	.DIPA	(4'h0),						// Port A 4-bit parity Input
-	.DOA	(),							// Port A 32-bit Data Output
-	.DOPA	(),							// Port A 4-bit Parity Output
 
-	.WEB	(1'b0),						// Port B Write Enable Input
-	.ENB	(1'b1),						// Port B RAM Enable Input
-	.SSRB	(1'b0),						// Port B Synchronous Set/Reset Input
-	.CLKB	(clock),					// Port B Clock
-	.ADDRB	(radr_mux[8:0]),			// Port B 9-bit Address Input
-	.DIB	(32'h00000000),				// Port B 32-bit Data Input
-	.DIPB	(4'h0),						// Port-B 4-bit parity Input
-	.DOB	(dob[i+31:i]),				// Port B 32-bit Data Output
-	.DOPB	());						// Port B 4-bit Parity Output
+	RAMB16_S36_S36 #(
+	.WRITE_MODE_A		("READ_FIRST"),			// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.WRITE_MODE_B		("READ_FIRST"),			// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.SIM_COLLISION_CHECK("ALL")					// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
+	) uram (
+	.WEA	(1'b0),								// Port A Write Enable Input
+	.ENA	(1'b1),								// Port A RAM Enable Input
+	.SSRA	(1'b0),								// Port A Synchronous Set/Reset Input
+	.CLKA	(clock),							// Port A Clock
+	.ADDRA	(radr_mux[8:0]),					// Port A  9-bit Address Input
+	.DIA	(32'h00000000),						// Port A 32-bit Data Input
+	.DIPA	(4'h0),								// Port A  4-bit parity Input
+	.DOA	(doa[i+31:i]),						// Port A 32-bit Data Output
+	.DOPA	(),									// Port A  4-bit Parity Output
+
+	.WEB	(web),								// Port B Write Enable Input
+	.ENB	(1'b1),								// Port B RAM Enable Input
+	.SSRB	(1'b0),								// Port B Synchronous Set/Reset Input
+	.CLKB	(clock),							// Port B Clock
+	.ADDRB	(wadr[8:0]),						// Port B  9-bit Address Input
+	.DIB	(ch_ff[i+31:i]),					// Port B 32-bit Data Input
+	.DIPB	(4'h0),								// Port B  4-bit parity Input
+	.DOB	(),									// Port B 32-bit Data Output
+	.DOPB	());								// Port B  4-bit Parity Output
 	end
 	endgenerate
 
-// RAM inital contents sets data=address, 32bit data = 8 hex digits per address,8 addresses per line
-	`include "scope_ram_init.v"
+`elsif VIRTEX6
+	initial $display("scope160: generating Virtex6 RAMB18E1");
+	generate
+	for (i=0; i<MXCH; i=i+32) begin: ram
+
+	RAMB18E1 #(									// Virtex6
+	.RAM_MODE			("SDP"),				// SDP or TDP
+ 	.READ_WIDTH_A		(36),					// 0,1,2,4,9,18,36 Read/write width per port
+	.READ_WIDTH_B		(0),					// 0,1,2,4,9,18
+	.WRITE_WIDTH_A		(0),					// 0,1,2,4,9,18
+	.WRITE_WIDTH_B		(36),					// 0,1,2,4,9,18,36
+	.WRITE_MODE_A		("READ_FIRST"),			// Must be same for both ports in SDP mode: WRITE_FIRST, READ_FIRST, or NO_CHANGE)
+	.WRITE_MODE_B		("READ_FIRST"),
+	.SIM_COLLISION_CHECK("ALL")					// Colision check: Values (ALL, WARNING_ONLY, GENERATE_X_ONLY or NONE)
+	) uram (
+	.WEA				(),						//  2-bit A port write enable input
+	.ENARDEN			(1'b1),					//  1-bit A port enable/Read enable input
+	.RSTRAMARSTRAM		(1'b0),					//  1-bit A port set/reset input
+	.RSTREGARSTREG		(1'b0),					//  1-bit A port register set/reset input
+	.REGCEAREGCE		(1'b0),					//  1-bit A port register enable/Register enable input
+	.CLKARDCLK			(clock),				//  1-bit A port clock/Read clock input
+	.ADDRARDADDR		({radr_mux[8:0],5'h1F}),// 14-bit A port address/Read address input
+	.DIADI				(ch_ff[i+15:i]),		// 16-bit A port data/LSB data input
+	.DIPADIP			(),						//  2-bit A port parity/LSB parity input
+	.DOADO				(doa[i+15:i]),			// 16-bit A port data/LSB data output
+	.DOPADOP			(),						//  2-bit A port parity/LSB parity output
+
+	.WEBWE				({4{web}}),				//  4-bit B port write enable/Write enable input
+	.ENBWREN			(1'b1),					//  1-bit B port enable/Write enable input
+	.REGCEB				(1'b0),					//  1-bit B port register enable input
+	.RSTRAMB			(1'b0),					//  1-bit B port set/reset input
+	.RSTREGB			(1'b0),					//  1-bit B port register set/reset input
+	.CLKBWRCLK			(clock),				//  1-bit B port clock/Write clock input
+	.ADDRBWRADDR		({wadr[8:0],5'h1F}),	// 14-bit B port address/Write address input
+	.DIBDI				(ch_ff[i+31:i+16]),		// 16-bit B port data/MSB data input
+	.DIPBDIP			(),						//  2-bit B port parity/MSB parity input
+	.DOBDO				(doa[i+31:i+16]),		// 16-bit B port data/MSB data output
+	.DOPBDOP			()						//  2-bit B port parity/MSB parity output
+	);
+	end
+	endgenerate
+`else
+	initial begin
+	$display ("scope160: Virtex Undefined. Halting.");
+	$finish
+	end
+`endif
 
 // Multiplex RAM output data
 	reg [15:0] rdata;
 
 	always @* begin
 	case (ram_mux_ff[3:0])
-	4'h0:	rdata[15:0] <= dob[15:0];
-	4'h1:	rdata[15:0] <= dob[31:16];
-	4'h2:	rdata[15:0] <= dob[47:32];
-	4'h3:	rdata[15:0] <= dob[63:48];
-	4'h4:	rdata[15:0] <= dob[79:64];
-	4'h5:	rdata[15:0] <= dob[95:80];
-	4'h6:	rdata[15:0] <= dob[111:96];
-	4'h7:	rdata[15:0] <= dob[127:112];
-	4'h8:	rdata[15:0] <= dob[143:128];
-	4'h9:	rdata[15:0] <= dob[159:144];
-	default:rdata[15:0] <= dob[15:0];
+	4'h0:	rdata[15:0] <= doa[15:0];
+	4'h1:	rdata[15:0] <= doa[31:16];
+	4'h2:	rdata[15:0] <= doa[47:32];
+	4'h3:	rdata[15:0] <= doa[63:48];
+	4'h4:	rdata[15:0] <= doa[79:64];
+	4'h5:	rdata[15:0] <= doa[95:80];
+	4'h6:	rdata[15:0] <= doa[111:96];
+	4'h7:	rdata[15:0] <= doa[127:112];
+	4'h8:	rdata[15:0] <= doa[143:128];
+	4'h9:	rdata[15:0] <= doa[159:144];
+	default:rdata[15:0] <= doa[15:0];
 	endcase
 	end
 

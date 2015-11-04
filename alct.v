@@ -6,117 +6,122 @@
 // Demultiplexes 80MHz ALCT signals 1:2 to 40MHz
 // Maps ALCT rxnn signal names
 //------------------------------------------------------------------------------------------------------------------
-// 11/26/01 Initial
-// 12/03/01 Replaced local demux logic with x_demux
-// 12/20/01 Added transmit mux
-// 12/28/01 Added valid_pattern_flag output
-// 01/15/02 Added ext inject and trigger enables from cfg register
-// 01/28/02 Added transmitter sync, now rx with tmb clock, tx with alct clock
-// 02/06/02 Added aclr to demux
-// 03/02/02 Replaced library calls with behavioral code
-// 03/03/02 Added sequencer RAM
-// 03/12/02 Added CCB front panel status
-// 03/14/02 Added alct0_vme
-// 03/18/02 Special version: transmits on 40MHz falling edge, does not use alct_clock or alct_clock_2x
-// 03/20/02 Added alct_clear to blank received data, added alct injector
-// 03/21/02 Injector now waits for start to clear before re-arming
-// 03/27/02 Alct_clear now prevents ram writing for alct-less running
-// 03/28/02 Add word count to vme and timing test points
-// 03/29/02 Change wadr reset to sequencer signal, was on l1a before
-// 04/24/02 Changed alct_status assignments to share with tmb signals
-// 06/03/02 Active feb flag now comes from alct0, as flag is not implemented on ALCT board
-// 06/07/02 Fixed active feb to work with injector
-// 06/24/02 Active FEB flag finally implemented on ALCT board, add it here, and modify injector
-// 10/15/02 Revert to clock_alct and 2x for ALCT transmitter
-// 01/09/03 ALCT raw hits now go directly to DMB backplane
-// 01/22/03 Remove alct_active_feb ff to speed it up 1 clock, add VME readout of ALCT raw hits
-// 02/04/03 Add aset to x_mux
-// 04/22/03 Mod alct_clear to keep wr_fifo high
-// 05/07/03 Add alct_2nd_valid for scope
-// 05/14/03 Add fifo controls to sync vme readout with clct
-// 03/12/04 Change to ddr inputs to avoid clock sharing conflict with rpc
-// 03/15/04 Change to ddr outputs
-// 04/19/04 Clear alct ram word count on vme reset
-// 04/19/04 Revert alct_rx from DDR to 80MHz, had sync err on 1/2 the bits for some unknown reason
-// 04/20/04 Revert all DDR to 80MHz
-// 06/07/04 Change to x_demux_v2 which has aset for mpc
-// 07/30/04 Add crc error detection
-// 08/02/04 Add alct event counters
-// 08/03/04 Add evcnt_reset to event counters
-// 08/09/04 Add oneshot to ext_trig and ext_inject
-// 08/23/04 Add alct registers for alct board debug firmware
-// 08/25/04 Add vme xor to ccb_clock_enable
-// 08/26/04 Add stop on any counter overflowed
-// 08/30/04 Add lct compare for alct debug firmware
-// 10/05/04 Add crc error test point for oscope trigger
-// 03/03/06 Fix spelling, no logic changes
-// 08/30/06 Store full alct bxn for vme readout
-// 09/11/06 Mods for xstetc to 
-// 09/19/06 Change to virtex 2 rams, mod alct_sync_mode mux to send 1s in high order alct_txa/b
-// 10/10/06 Replace 80mhz mux and demux with 40mhz ddr
-// 04/27/07 Remove rx sync stage, shifts rx clock 12.5ns
-// 07/16/07 Replace 9 8kx2 RAMs with 2 2kx9, mod wr_fifo=1 at power-up to block spurious ram writes
-// 07/16/07 Add reset to injector state machine so xst can recognize it
-// 07/18/07 Add dopa sump to avoid spurious parity bit warning
-// 08/23/07 Mod crc calc for new trailer format, increase mxalct to carry full bxn
-// 08/31/07 Expand vme counter width
-// 09/04/07 Consolidate counter widths
-// 09/07/07 Fix injector wait state
-// 09/10/07 Mod alct err
-// 09/14/07 Injected alct now counts as alct received
-// 10/10/07 Remove unused delay state in injector sm
-// 10/11/07 Conform crc logic to ddu, skip de0d marker because ddu logic fails to include it
-// 12/21/07 Add prefix to seu and seq status
-// 01/31/08 Removed 2bx FF delay in ALCT trigger path, send alcts to sequencer instead of tmb.v
-// 04/25/08 Add alct_bx0
-// 04/28/08 Reorganize event counters
-// 04/29/08 Convert to 2D counter arrays
-// 05/19/08 Mod alct stucture error detection to exclude wg=amu=q=bxn=0
-// 05/29/08 Subdivide alct structure error counter to count each error type, remove readout sync machine
-// 06/03/08 Add scope signals
-// 08/12/08 Add programmable alct data tx delay
-// 08/12/08 Add 0 inits to all FFs
-// 01/13/09 Expand alct_seq_cmd to 4 bits, take 1 from alct_reserved_in[4]
-// 01/16/09 Add alct cable loopback test logic
-// 01/21/09 Add rng comparison latch
-// 01/26/09 Rebuild alct transmit data mux to ensure 40MHz clock alignment, add sync_mode error latch
-// 01/30/09 Enable alct transmitter lfsr with alct_sync_tx_random
-// 02/05/09 Add received data blanking during alct_sync_mode
-// 02/24/09 Add ECC to received data
-// 03/02/09 Add ECC enable, add ECC result to randoms pipeline, add ECC result to alct's lct
-// 03/03/09 Add ECC to transmit data, remove dmb signals from ecc, add FF to receive data ecc stage
-// 03/11/09 Add counters for all ecc syndrome cases
-// 03/12/09 Add alct bx0 counter
-// 03/16/09 Add 1bx to alct trigger path to buffer ecc decoding
-// 03/20/09 Redesign alct.v x_mux sync stage to improve alct_rx_clock window
-// 03/24/09 Add buffer ffs before iobs in 80mhz mux
-// 03/26/09 Move alct tx FFs into sync mux sub design
-// 03/30/09 Add interstage to alct transmitter
-// 04/06/09 Remove mux ffs replaced by sync-stage FFs in x_mux
-// 04/07/09 Put mux ffs back, they improve rx tx good spots
-// 04/22/09 Shorten ALCT raw hits storage from 2048 to 1024bx to free up a block ram
-// 04/23/09 Revert alct raw hits word counter to 2048, but keep ram storage at 1024, alc672 uses 924 words
-// 05/08/09 Add pre-delay to random pattern delay pipeline to span 8-23bx instead of 0-15bx
-// 05/12/09 Add alct trigger path blanking option if ecc cannot correct an error, add counter for blocked alcts
-// 05/12/09 Remove seq_status[1:0], seu_status[1:0], reserved_out[3:0], reserved_in[3:0] from VME
-// 05/27/09 Change to alct receive data muonic timing to float ALCT board in clock-space
-// 05/28/09 Connect muonic timing clocks from bufmuxg
-// 06/12/09 Replace txd rxd interstages with lac clock
-// 06/16/09 Remove digital phase shift half cycle
-// 07/10/09 Replace rx mux with cfeb version but with internal iob true attribute enabled
-// 07/22/09 Remove delay and posneg from alct receiver sync stage
-// 08/05/09 a;ct_rx: Remove interstage delay SRL and iob async clear, add final stage sync clear
-// 08/05/09 alct_tx: Move timing constraints to ucf, remove async clear, add sync clear to IOB ffs
-// 08/13/09 Put alct rxd posneg back
-// 08/14/09 Mod for new posneg structure
-// 08/14/09 Take alct posneg back out, can not pass timing in par
-// 08/17/09 Put alct posneg back in, with 2x clock interstage, and new alct rx locs in par
-// 09/03/09 Change alct_txd_delay name
-// 09/14/09 Add ecc rx tx error outputs to sync err module
-// 10/14/09 Add error counter for 2-identical alct muons
-// 10/15/09 Add ff pipe for alct structure errors
-// 02/26/10 Add event clear for alct vme diagnostic registers
-// 06/30/10 Mod injector RAM for alct and l1a bits
+//	11/26/01 Initial
+//	12/03/01 Replaced local demux logic with x_demux
+//	12/20/01 Added transmit mux
+//	12/28/01 Added valid_pattern_flag output
+//	01/15/02 Added ext inject and trigger enables from cfg register
+//	01/28/02 Added transmitter sync, now rx with tmb clock, tx with alct clock
+//	02/06/02 Added aclr to demux
+//	03/02/02 Replaced library calls with behavioral code
+//	03/03/02 Added sequencer RAM
+//	03/12/02 Added CCB front panel status
+//	03/14/02 Added alct0_vme
+//	03/18/02 Special version: transmits on 40MHz falling edge, does not use alct_clock or alct_clock_2x
+//	03/20/02 Added alct_clear to blank received data, added alct injector
+//	03/21/02 Injector now waits for start to clear before re-arming
+//	03/27/02 Alct_clear now prevents ram writing for alct-less running
+//	03/28/02 Add word count to vme and timing test points
+//	03/29/02 Change wadr reset to sequencer signal, was on l1a before
+//	04/24/02 Changed alct_status assignments to share with tmb signals
+//	06/03/02 Active feb flag now comes from alct0, as flag is not implemented on ALCT board
+//	06/07/02 Fixed active feb to work with injector
+//	06/24/02 Active FEB flag finally implemented on ALCT board, add it here, and modify injector
+//	10/15/02 Revert to clock_alct and 2x for ALCT transmitter
+//	01/09/03 ALCT raw hits now go directly to DMB backplane
+//	01/22/03 Remove alct_active_feb ff to speed it up 1 clock, add VME readout of ALCT raw hits
+//	02/04/03 Add aset to x_mux
+//	04/22/03 Mod alct_clear to keep wr_fifo high
+//	05/07/03 Add alct_2nd_valid for scope
+//	05/14/03 Add fifo controls to sync vme readout with clct
+//	03/12/04 Change to ddr inputs to avoid clock sharing conflict with rpc
+//	03/15/04 Change to ddr outputs
+//	04/19/04 Clear alct ram word count on vme reset
+//	04/19/04 Revert alct_rx from DDR to 80MHz, had sync err on 1/2 the bits for some unknown reason
+//	04/20/04 Revert all DDR to 80MHz
+//	06/07/04 Change to x_demux_v2 which has aset for mpc
+//	07/30/04 Add crc error detection
+//	08/02/04 Add alct event counters
+//	08/03/04 Add evcnt_reset to event counters
+//	08/09/04 Add oneshot to ext_trig and ext_inject
+//	08/23/04 Add alct registers for alct board debug firmware
+//	08/25/04 Add vme xor to ccb_clock_enable
+//	08/26/04 Add stop on any counter overflowed
+//	08/30/04 Add lct compare for alct debug firmware
+//	10/05/04 Add crc error test point for oscope trigger
+//	03/03/06 Fix spelling, no logic changes
+//	08/30/06 Store full alct bxn for vme readout
+//	09/11/06 Mods for xstetc to 
+//	09/19/06 Change to virtex 2 rams, mod alct_sync_mode mux to send 1s in high order alct_txa/b
+//	10/10/06 Replace 80mhz mux and demux with 40mhz ddr
+//	04/27/07 Remove rx sync stage, shifts rx clock 12.5ns
+//	07/16/07 Replace 9 8kx2 RAMs with 2 2kx9, mod wr_fifo=1 at power-up to block spurious ram writes
+//	07/16/07 Add reset to injector state machine so xst can recognize it
+//	07/18/07 Add dopa sump to avoid spurious parity bit warning
+//	08/23/07 Mod crc calc for new trailer format, increase mxalct to carry full bxn
+//	08/31/07 Expand vme counter width
+//	09/04/07 Consolidate counter widths
+//	09/07/07 Fix injector wait state
+//	09/10/07 Mod alct err
+//	09/14/07 Injected alct now counts as alct received
+//	10/10/07 Remove unused delay state in injector sm
+//	10/11/07 Conform crc logic to ddu, skip de0d marker because ddu logic fails to include it
+//	12/21/07 Add prefix to seu and seq status
+//	01/31/08 Removed 2bx FF delay in ALCT trigger path, send alcts to sequencer instead of tmb.v
+//	04/25/08 Add alct_bx0
+//	04/28/08 Reorganize event counters
+//	04/29/08 Convert to 2D counter arrays
+//	05/19/08 Mod alct stucture error detection to exclude wg=amu=q=bxn=0
+//	05/29/08 Subdivide alct structure error counter to count each error type, remove readout sync machine
+//	06/03/08 Add scope signals
+//	08/12/08 Add programmable alct data tx delay
+//	08/12/08 Add 0 inits to all FFs
+//	01/13/09 Expand alct_seq_cmd to 4 bits, take 1 from alct_reserved_in[4]
+//	01/16/09 Add alct cable loopback test logic
+//	01/21/09 Add rng comparison latch
+//	01/26/09 Rebuild alct transmit data mux to ensure 40MHz clock alignment, add sync_mode error latch
+//	01/30/09 Enable alct transmitter lfsr with alct_sync_tx_random
+//	02/05/09 Add received data blanking during alct_sync_mode
+//	02/24/09 Add ECC to received data
+//	03/02/09 Add ECC enable, add ECC result to randoms pipeline, add ECC result to alct's lct
+//	03/03/09 Add ECC to transmit data, remove dmb signals from ecc, add FF to receive data ecc stage
+//	03/11/09 Add counters for all ecc syndrome cases
+//	03/12/09 Add alct bx0 counter
+//	03/16/09 Add 1bx to alct trigger path to buffer ecc decoding
+//	03/20/09 Redesign alct.v x_mux sync stage to improve alct_rx_clock window
+//	03/24/09 Add buffer ffs before iobs in 80mhz mux
+//	03/26/09 Move alct tx FFs into sync mux sub design
+//	03/30/09 Add interstage to alct transmitter
+//	04/06/09 Remove mux ffs replaced by sync-stage FFs in x_mux
+//	04/07/09 Put mux ffs back, they improve rx tx good spots
+//	04/22/09 Shorten ALCT raw hits storage from 2048 to 1024bx to free up a block ram
+//	04/23/09 Revert alct raw hits word counter to 2048, but keep ram storage at 1024, alc672 uses 924 words
+//	05/08/09 Add pre-delay to random pattern delay pipeline to span 8-23bx instead of 0-15bx
+//	05/12/09 Add alct trigger path blanking option if ecc cannot correct an error, add counter for blocked alcts
+//	05/12/09 Remove seq_status[1:0], seu_status[1:0], reserved_out[3:0], reserved_in[3:0] from VME
+//	05/27/09 Change to alct receive data muonic timing to float ALCT board in clock-space
+//	05/28/09 Connect muonic timing clocks from bufmuxg
+//	06/12/09 Replace txd rxd interstages with lac clock
+//	06/16/09 Remove digital phase shift half cycle
+//	07/10/09 Replace rx mux with cfeb version but with internal iob true attribute enabled
+//	07/22/09 Remove delay and posneg from alct receiver sync stage
+//	08/05/09 a;ct_rx: Remove interstage delay SRL and iob async clear, add final stage sync clear
+//	08/05/09 alct_tx: Move timing constraints to ucf, remove async clear, add sync clear to IOB ffs
+//	08/13/09 Put alct rxd posneg back
+//	08/14/09 Mod for new posneg structure
+//	08/14/09 Take alct posneg back out, can not pass timing in par
+//	08/17/09 Put alct posneg back in, with 2x clock interstage, and new alct rx locs in par
+//	09/03/09 Change alct_txd_delay name
+//	09/14/09 Add ecc rx tx error outputs to sync err module
+//	10/14/09 Add error counter for 2-identical alct muons
+//	10/15/09 Add ff pipe for alct structure errors
+//	02/26/10 Add event clear for alct vme diagnostic registers
+//	06/30/10 Mod injector RAM for alct and l1a bits
+//	07/23/10 Replace DDR sub-modules
+//	07/26/10 Port to ise 12
+//	08/05/10 Add power up holdoff on alct_dmb_ff to wait for alct_rx muonic to initialize
+//	08/05/10 Invert logic on _wr_fifo at alct_2nd_ff[17]
+//	10/15/10 Add virtex 6 RAM option
 //-----------------------------------------------------------------------------------------------------------------
 	module alct
 	(
@@ -287,6 +292,9 @@
 	,parity_out
 	,alct_ecc_err_rx
 	,alct_sent_bxn
+	,alct_wdata
+ 	,alct_adr
+	,alct_wr
 `endif
 	);
 //-----------------------------------------------------------------------------------------------------------------
@@ -297,6 +305,8 @@
 	parameter MXARAMDATA	=	18;					// Number ALCT Raw Hits RAM data bits, does not include fifo wren
 	parameter MXCNTVME		=	30;					// VME counter width
 	parameter MXASERR		=	6;					// Number of ALCT structure error counters 
+
+	`include "firmware_version.v"
 
 //-----------------------------------------------------------------------------------------------------------------
 // Ports
@@ -468,6 +478,9 @@
 	output	[5:0]			parity_out;				// ECC parity for input data
 	output	[1:0]			alct_ecc_err_rx;
 	output					alct_sent_bxn;
+	output	[MXARAMDATA-1:0]alct_wdata;
+ 	output	[MXARAMADR-1:0]	alct_adr;
+	output					alct_wr;
 `endif
 //-----------------------------------------------------------------------------------------------------------------
 // Local
@@ -542,7 +555,7 @@
 	SRL16E upup (.CLK(clock),.CE(!powerupq),.D(1'b1),.A0(pdly[0]),.A1(pdly[1]),.A2(pdly[2]),.A3(pdly[3]),.Q(powerupq));
 
 	always @(posedge clock) begin
-	powerup_ff  <= powerupq && !(global_reset || ttc_resync);
+	powerup_ff <= powerupq && !(global_reset || ttc_resync);
 	end
 
 	wire sm_reset  = !powerup_ff;	// injector state machine reset
@@ -568,7 +581,7 @@
 	wire	[28:1]	alct_1st_ff;
 	wire	[28:1]	alct_2nd_ff;
 
-	x_demux_ddr_muonic_alct #(28) ux_demux_alct (
+	x_demux_ddr_alct_muonic #(28) ux_demux_alct (
 	.clock		(clock),					// In	40MHz TMB main clock
 	.clock_2x	(clock_2x),					// In	80MHz commutator clock
 	.clock_iob	(clock_alct_rxd),			// In	40MHZ iob ddr clock
@@ -584,8 +597,8 @@
 	reg [28:1] alct_sync_rxdata_2nd = 0;
 
 	always @(posedge clock) begin
-	alct_sync_rxdata_1st[28:1]	<=	alct_1st_ff[28:1];
-	alct_sync_rxdata_2nd[28:1]	<=	alct_2nd_ff[28:1];
+	alct_sync_rxdata_1st[28:1] <= alct_1st_ff[28:1];
+	alct_sync_rxdata_2nd[28:1] <= alct_2nd_ff[28:1];
 	end
 
 // Determine ALCT sync mode set by seq_cmd
@@ -610,7 +623,7 @@
 	assign alct_rx_1st_tpat[9:0] = {alct_tx_1st_tpat[16:15],alct_tx_1st_tpat[12:5]};	// Skip over pairs 13,14 wot carry seq_cmd
 	assign alct_rx_2nd_tpat[9:0] = {alct_tx_2nd_tpat[16:15],alct_tx_2nd_tpat[12:5]};	// Skip over pairs 13,14 wot carry seq_cmd
 
-	always @(posedge clock)  begin
+	always @(posedge clock) begin
 	if (alct_sync_mode     ) begin							// Only if in loopback mode
 	if (alct_sync_teventodd) begin							// Teven/Tod Mode:
 	alct_sync_expect_1st[28:01] <= 28'hAAAAAAA;				//   Load 1010 Teven in all banks
@@ -853,7 +866,7 @@
 	assign	rx_bxn[4]			=	alct_2nd_ff[16];
 
 	assign	rx_bxn[2]			=	alct_1st_ff[17];
-	assign	_wr_fifo			=	alct_2nd_ff[17] && !(alct_clear || sm_reset);
+	assign	_wr_fifo			=	alct_2nd_ff[17] || alct_clear || sm_reset;
 
 	assign	daq_data[ 0]		=	alct_1st_ff[18];
 	assign	daq_data[ 7]		=	alct_2nd_ff[18];
@@ -936,12 +949,12 @@
 	wire   alct_ecc_blank  = ecc_err[1] & alct_ecc_err_blank & alct_ecc_en;
 
 	always @(posedge clock) begin
-	if (alct_ecc_blank)	alct_dec_out[29:0]	<= 0;
-	else				alct_dec_out[29:0]	<= dec_out[29:0];
+	if (alct_ecc_blank)	alct_dec_out[29:0] <= 0;
+	else				alct_dec_out[29:0] <= dec_out[29:0];
 	end
 
 	always @(posedge clock) begin
-	alct_ecc_err[1:0]	<= ecc_err[1:0];
+	alct_ecc_err[1:0] <= ecc_err[1:0];
 	end
 
 	assign alct_ecc_err_tx_1bit = (alct_ecc_err == 1);	// err = 1:  1-bit corrected
@@ -1044,8 +1057,8 @@
 	wire [MXALCT-1:0] alct1_mux;
 	reg	  pass_ff = 0;
 
-	assign alct0_rx = (alct_sync_mode) ? 0 : alct0;
-	assign alct1_rx = (alct_sync_mode) ? 0 : alct1;
+	assign alct0_rx = (alct_sync_mode) ? 1'b0 : alct0;
+	assign alct1_rx = (alct_sync_mode) ? 1'b0 : alct1;
 	wire   active_feb_flag_rx = (alct_sync_mode) ? 0 : active_feb_flag;
 
 	assign alct0_mux =	(pass_ff) ? alct0_rx : alct0_inj_ff;
@@ -1062,7 +1075,7 @@
 	reg [4:0] bxn_alct_vme=0;
 
 	always @(posedge clock) begin
-	if(alct0_valid)							// alct_1st_valid
+	if (alct0_valid)						// alct_1st_valid
 	bxn_alct_vme[4:0] <= alct0_mux[15:11];	// bxn[4:0]
 	end
 
@@ -1078,15 +1091,15 @@
 	alct1_sff <= alct1_mux[10:0];
 	end
 
-	assign alct_struct_err[0] = !alct0_sff[0] && (|alct0_sff[10:1]);	// expect all zero bits if alct0_vpf is 0
-	assign alct_struct_err[1] = !alct1_sff[0] && (|alct1_sff[10:1]);	// expect all zero bits if alct1_vpf is 0
-	assign alct_struct_err[2] = !alct0_sff[0] && alct1_sff[0];			// expect alct0_vpf=1 if alct1_vpf=1
+	assign alct_struct_err[0] = !alct0_sff[0] &&  (|alct0_sff[10:1]);	// expect all zero bits if alct0_vpf is 0
+	assign alct_struct_err[1] = !alct1_sff[0] &&  (|alct1_sff[10:1]);	// expect all zero bits if alct1_vpf is 0
+	assign alct_struct_err[2] = !alct0_sff[0] &&    alct1_sff[0];		// expect alct0_vpf=1 if alct1_vpf=1
 	assign alct_struct_err[3] =  alct0_sff[0] && !(|alct0_sff[10:1]);	// expect some non-zero bits if vpf is 1
 	assign alct_struct_err[4] =  alct1_sff[0] && !(|alct1_sff[10:1]);	// expect some non-zero bits if vpf is 1
-	assign alct_struct_err[5] =  alct0_sff[0] && (alct0_sff[10:0]==alct1_sff[10:0]); // expect alct0!=alct1 if vpf is 1
+	assign alct_struct_err[5] =  alct0_sff[0] &&   (alct0_sff[10:0]==alct1_sff[10:0]); // expect alct0!=alct1 if vpf is 1
 
 	always @(posedge clock) begin
-	alct_lct_err = (|alct_struct_err) && cnt_alct_debug;
+	alct_lct_err <= (|alct_struct_err) && cnt_alct_debug;
 	end
 
 // Latch LCTs for VME readout
@@ -1105,7 +1118,7 @@
 	end
 
 // Buffer test points for clock alignment tests
-	reg	alct_wr_fifo_tp		= 0;
+	reg	alct_wr_fifo_tp		= 1;
 	reg alct_first_frame_tp	= 0;
 	reg alct_last_frame_tp	= 0;
 
@@ -1138,34 +1151,34 @@
 
 	always @(posedge clock) begin
 	if(sm_reset) begin
-	 inj_sm = pass;
+	 inj_sm <= pass;
 	 end
 	else begin
 	case (inj_sm)
 	pass:							// Wait for inject command
 	 if (alct_inject_ff)
-	 inj_sm	=	wait_clct;
+	 inj_sm	<= wait_clct;
 
 	wait_clct:						// Wait for CLCT
 	 if (inj_clct_cnt_done)
-	 inj_sm	=	active;
+	 inj_sm	<= active;
 
 	active:							// Fire alct_active_feb
-	 inj_sm	=	wait_alct;
+	 inj_sm	<= wait_alct;
 
 	wait_alct:						// Emulate ALCT active_feb_flag -to- alct[] delay
 	 if (inj_alct_cnt_done)
-	 inj_sm	=	injecting;
+	 inj_sm	<= injecting;
 
 	injecting:						// Inject ALCT[] data into stream
-	 inj_sm	=	wait_vme;
+	 inj_sm	<= wait_vme;
 
 	wait_vme:						// Wait for VME command to go away
 	 if(!alct_inject_ff)
-	 inj_sm	=	pass;
+	 inj_sm	<= pass;
 
 	default
-	 inj_sm	=	pass;
+	 inj_sm	<= pass;
 	endcase
 	end
 	end
@@ -1174,8 +1187,8 @@
 	reg [4:0] inj_clct_cnt=0;
 
 	always @(posedge clock) begin
-	if		(inj_sm!=wait_clct) inj_clct_cnt = alct_inj_delay;		// Sync  load
-	else if	(inj_sm==wait_clct) inj_clct_cnt = inj_clct_cnt - 1;	// Sync  count
+	if		(inj_sm!=wait_clct) inj_clct_cnt <= alct_inj_delay;			// Sync  load
+	else if	(inj_sm==wait_clct) inj_clct_cnt <= inj_clct_cnt - 1'b1;	// Sync  count
 	end
 
 	assign inj_clct_cnt_done= inj_clct_cnt == 0;
@@ -1184,8 +1197,8 @@
 	reg	[1:0] inj_alct_cnt=0;
 
 	always @(posedge clock) begin
-	if		(inj_sm!=wait_alct) inj_alct_cnt = 0;					// Sync  load
-	else if	(inj_sm==wait_alct) inj_alct_cnt = inj_alct_cnt - 1;	// Sync  count
+	if		(inj_sm!=wait_alct) inj_alct_cnt <= 0;						// Sync  load
+	else if	(inj_sm==wait_alct) inj_alct_cnt <= inj_alct_cnt - 1'b1;	// Sync  count
 	end
 
 	assign inj_alct_cnt_done= inj_alct_cnt == 0;
@@ -1217,12 +1230,13 @@
 	assign	alct_dmb_mux[18]	= _wr_fifo;
 
 // Blank DMB signals during alct sync mode
-	assign alct_dmb[18:0] = (alct_sync_mode) ? 0: alct_dmb_mux[18:0];
+	assign alct_dmb[18:0] = (alct_sync_mode) ? 19'h0 : alct_dmb_mux[18:0];
 
 // Latch DMB data for local raw hits RAM fanout
-	reg	[18:0] alct_dmb_ff = 19'b1000000000000000000;// Power up with wr_fifo bit=1
+	reg	[18:0] alct_dmb_ff = (1 << 18);				// Power up with wr_fifo bit=1
 
 	always @(posedge clock) begin
+	if (powerup_ff)
 	alct_dmb_ff <= alct_dmb;
 	end
 
@@ -1333,10 +1347,10 @@
 	for (j=0; j<=N; j=j+1) begin: gencnt
 	always @(posedge clock) begin
 	if (vme_cnt_reset) begin
-	cnt[j] = cnt_fatzero;								// Clear counter j
+	cnt[j] <= cnt_fatzero;								// Clear counter j
 	end
 	else if (cnt_en_all) begin
-	if(cnt_en[j] && cnt_nof[j]) cnt[j] = cnt[j]+1;		// Increment counter j if it has not overflowed
+	if(cnt_en[j] && cnt_nof[j]) cnt[j] <= cnt[j]+1'b1;		// Increment counter j if it has not overflowed
 	end
 	end
 	end
@@ -1358,15 +1372,14 @@
 	assign event_counter12	= cnt[12];
 
 // ALCT Structure Error Counters
-	reg	[7:0] errcnt [MXASERR-1:0];
-	reg [MXASERR-1:0] errcnt_en=0;
+	reg	 [7:0]         errcnt [MXASERR-1:0];
+	reg  [MXASERR-1:0] errcnt_en=0;
+	wire [MXASERR-1:0] errcnt_nof;
+	wire [7:0]         errcnt_fullscale=8'hFF;
 
 	always @(posedge clock) begin
-	errcnt_en	<= alct_struct_err;
+	errcnt_en <= alct_struct_err;
 	end
-
-	wire [7:0] errcnt_fullscale = 8'hFF;
-	wire [MXASERR-1:0] errcnt_nof;
 
 	generate
 	for (j=0; j<=MXASERR-1; j=j+1) begin: genenof
@@ -1378,10 +1391,10 @@
 	for (j=0; j<=MXASERR-1; j=j+1) begin: genecnt
 	always @(posedge clock) begin
 	if (vme_cnt_reset) begin
-	errcnt[j] = 0;
+	errcnt[j] <= 0;
 	end
 	else begin
-	if(errcnt_en[j] && errcnt_nof[j]) errcnt[j] = errcnt[j]+1;
+	if(errcnt_en[j] && errcnt_nof[j]) errcnt[j] <= errcnt[j]+1'b1;
 	end
 	end
 	end
@@ -1405,8 +1418,8 @@
 	wire wadr_cnten = ~alct_dmb_ff[18];
 
 	always @(posedge clock) begin
-	if		(wadr_reset) wadr = 0;					// sync clear
-	else if (wadr_cnten) wadr = wadr + 1;			// sync count
+	if		(wadr_reset) wadr <= 0;					// sync clear
+	else if (wadr_cnten) wadr <= wadr + 1'b1;		// sync count
 	end
 
 // Buffer DMB write address counter and data
@@ -1415,9 +1428,9 @@
 	reg						alct_wr		= 0;
 
 	always @(posedge clock) begin
-	alct_wdata	<= alct_dmb_ff[17:0];
+	alct_wdata	<=  alct_dmb_ff[17:0];
 	alct_wr		<= ~alct_dmb_ff[18];
-	alct_adr	<= wadr;
+	alct_adr	<=  wadr;
 	end
 
 // Latch ALCT word count for VME
@@ -1441,36 +1454,80 @@
 
 	assign alct_raw_done	= !alct_wr && (alct_raw_wdcnt !=0) ;	// Raw hits ready for VME readout
 
-// RAM Instantiation 18 bits x 1024 addresses Port A: ALCT write, no read, Port B: VME read, no write
+// RAM Instantiation 18 bits x 1024 addresses
+//  Port A: ALCT write, no read
+//  Port B: VME read+write
 	wire [1:0] dopa;							// dummy
 
 	wire alct_ena = alct_wr;					// Only enable port A during alct writes
 	wire vme_enb  = !alct_ena;					// Enable port B when A is not busy over-writing it
 
-	RAMB16_S18_S18 #(
-	.WRITE_MODE_A		("WRITE_FIRST" ),	// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.WRITE_MODE_B		("WRITE_FIRST" ),	// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.SIM_COLLISION_CHECK("WARNING_ONLY"))	// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
-	u0 (
-	.WEA	(alct_wr),			// Port A Write Enable Input
-	.ENA	(alct_ena),			// Port A RAM Enable Input
-	.SSRA	(1'b0),				// Port A Synchronous Set/Reset Input
-	.CLKA	(clock),			// Port A Clock
-	.ADDRA	(alct_adr[9:0]),	// Port A 10-bit Address Input
-	.DIA	(alct_wdata[15:0]),	// Port A 16-bit Data Input
-	.DIPA	(alct_wdata[17:16]),// Port A 2-bit parity Input
-	.DOA	(),					// Port A 16-bit Data Output
-	.DOPA	(dopa[1:0]),		// Port A 2-bit Parity Output
+`ifdef VIRTEX2
+	initial $display("alct: generating Virtex2 RAMB16_S18_S18 u0");
 
-	.WEB	(vme_wr),			// Port B Write Enable Input
-	.ENB	(vme_enb),			// Port B RAM Enable Input
-	.SSRB	(1'b0),				// Port B Synchronous Set/Reset Input
-	.CLKB	(clock),			// Port B Clock
-	.ADDRB	(vme_adr[9:0]),			// Port B 10-bit Address Input
-	.DIB	(vme_wdata[15:0]),	// Port B 16-bit Data Input
-	.DIPB	(vme_wdata[17:16]),	// Port-B 2-bit parity Input
-	.DOB	(vme_rdata[15:0]),	// Port B 16-bit Data Output
-	.DOPB	(vme_rdata[17:16]));// Port B 2-bit Parity Output
+	RAMB16_S18_S18 #(
+	.WRITE_MODE_A		("READ_FIRST" ),		// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.WRITE_MODE_B		("READ_FIRST" ),		// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.SIM_COLLISION_CHECK("ALL")					// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
+	) u0 (
+	.WEA				(alct_wr),				// Port A Write Enable Input
+	.ENA				(alct_ena),				// Port A RAM Enable Input
+	.SSRA				(1'b0),					// Port A Synchronous Set/Reset Input
+	.CLKA				(clock),				// Port A Clock
+	.ADDRA				(alct_adr[9:0]),		// Port A 10-bit Address Input
+	.DIA				(alct_wdata[15:0]),		// Port A 16-bit Data Input
+	.DIPA				(alct_wdata[17:16]),	// Port A 2-bit parity Input
+	.DOA				(),						// Port A 16-bit Data Output
+	.DOPA				(dopa[1:0]),			// Port A 2-bit Parity Output
+
+	.WEB				(vme_wr),				// Port B Write Enable Input
+	.ENB				(vme_enb),				// Port B RAM Enable Input
+	.SSRB				(1'b0),					// Port B Synchronous Set/Reset Input
+	.CLKB				(clock),				// Port B Clock
+	.ADDRB				(vme_adr[9:0]),			// Port B 10-bit Address Input
+	.DIB				(vme_wdata[15:0]),		// Port B 16-bit Data Input
+	.DIPB				(vme_wdata[17:16]),		// Port-B 2-bit parity Input
+	.DOB				(vme_rdata[15:0]),		// Port B 16-bit Data Output
+	.DOPB				(vme_rdata[17:16]));	// Port B 2-bit Parity Output
+
+`elsif VIRTEX6
+	initial $display("alct: generating Virtex6 RAMB18E1_S18_S18 u0");
+	assign dopa=0;
+
+	RAMB18E1 #(									// Virtex6
+	.RAM_MODE			("TDP"),				// SDP or TDP
+ 	.READ_WIDTH_A		(0),					// 0,1,2,4,9,18,36 Read/write width per port
+	.WRITE_WIDTH_A		(18),					// 0,1,2,4,9,18
+	.READ_WIDTH_B		(18),					// 0,1,2,4,9,18
+	.WRITE_WIDTH_B		(18),					// 0,1,2,4,9,18,36
+	.WRITE_MODE_A		("READ_FIRST"),			// WRITE_FIRST, READ_FIRST, or NO_CHANGE
+	.WRITE_MODE_B		("READ_FIRST"),
+	.SIM_COLLISION_CHECK("ALL")					// ALL, WARNING_ONLY, GENERATE_X_ONLY or NONE)
+	) u0 (
+	.WEA				({2{alct_wr}}),			//  2-bit A port write enable input
+	.ENARDEN			(alct_ena),				//  1-bit A port enable/Read enable input
+	.RSTRAMARSTRAM		(1'b0),					//  1-bit A port set/reset input
+	.RSTREGARSTREG		(1'b0),					//  1-bit A port register set/reset input
+	.REGCEAREGCE		(1'b0),					//  1-bit A port register enable/Register enable input
+	.CLKARDCLK			(clock),				//  1-bit A port clock/Read clock input
+	.ADDRARDADDR		({alct_adr[9:0],4'hF}),	// 14-bit A port address/Read address input 18b->[13:4]
+	.DIADI				(alct_wdata[15:0]),		// 16-bit A port data/LSB data input
+	.DIPADIP			(alct_wdata[17:16]),	//  2-bit A port parity/LSB parity input
+	.DOADO				(),						// 16-bit A port data/LSB data output
+	.DOPADOP			(),						//  2-bit A port parity/LSB parity output
+
+	.WEBWE				({4{vme_wr}}),			//  4-bit B port write enable/Write enable input
+	.ENBWREN			(vme_enb),				//  1-bit B port enable/Write enable input
+	.REGCEB				(1'b0),					//  1-bit B port register enable input
+	.RSTRAMB			(1'b0),					//  1-bit B port set/reset input
+	.RSTREGB			(1'b0),					//  1-bit B port register set/reset input
+	.CLKBWRCLK			(clock),				//  1-bit B port clock/Write clock input
+	.ADDRBWRADDR		({vme_adr[9:0],4'hF}),	// 14-bit B port address/Write address input 18b->[13:4]
+	.DIBDI				(vme_wdata[15:0]),		// 16-bit B port data/MSB data input
+	.DIPBDIP			(vme_wdata[17:16]),		//  2-bit B port parity/MSB parity input
+	.DOBDO				(vme_rdata[15:0]),		// 16-bit B port data/MSB data output
+	.DOPBDOP			(vme_rdata[17:16]));	//  2-bit B port parity/MSB parity output
+`endif
 
 //-----------------------------------------------------------------------------------------------------------------
 //	ALCT Transmitter Section:
@@ -1615,8 +1672,8 @@
 	reg		   alct_txd_int_delay_is_0 = 0;
 
 	always @(posedge clock) begin
-	alct_srl_adr 			<= (alct_txd_int_delay -  1);
-	alct_txd_int_delay_is_0	<= (alct_txd_int_delay == 0);	// Use direct input if SRL address is 0, 1st SRL output has 1bx overhead
+	alct_srl_adr 			<= (alct_txd_int_delay -  1'b1);
+	alct_txd_int_delay_is_0	<= (alct_txd_int_delay == 0   );	// Use direct input if SRL address is 0, 1st SRL output has 1bx overhead
 	end
 
 	srl16e_bbl #(13) udlya1st (.clock(clock),.ce(1'b1),.adr(alct_srl_adr),.d(alct_txa_1st),.q(alct_txa_1st_srl));
@@ -1670,7 +1727,7 @@
 	end
 
 // Multiplex ALCT transmit data, latch in FDCE IOB FFs, 80MHz 1st in time is aligned with 40MHz rising edge
-	x_mux_ddr_muonic_alct #(5+13) ux_mux_alct
+	x_mux_ddr_alct_muonic #(5+13) ux_mux_alct
 	(
 	.clock		(clock),											// In	40MHz TMB main clock
 	.clock_lac	(clock_lac),										// In	40MHz logic accessible clock

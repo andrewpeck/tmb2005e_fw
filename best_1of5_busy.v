@@ -2,13 +2,14 @@
 //-------------------------------------------------------------------------------------------------------------------
 // Finds best 1 of 5 1/2-strip patterns comparing all patterns simultaneously
 //
-// 11/08/06	Initial
-// 12/13/06 Non-busy version
-// 12/20/06 Replace envelope hits with pattern ids
-// 12/22/06 Sort based on 6-bit patterns instead of just number of hits
-// 01/10/07 Increase pattern bits to 3 hits + 4 bends 
-// 01/25/07 Add busy logic to best_1of5.v
-// 05/08/07 Change pattern numbers 1-9 to 0-8 so lsb now implies bend direction, ignore lsb during sort
+//	11/08/06 Initial
+//	12/13/06 Non-busy version
+//	12/20/06 Replace envelope hits with pattern ids
+//	12/22/06 Sort based on 6-bit patterns instead of just number of hits
+//	01/10/07 Increase pattern bits to 3 hits + 4 bends 
+//	01/25/07 Add busy logic to best_1of5.v
+//	05/08/07 Change pattern numbers 1-9 to 0-8 so lsb now implies bend direction, ignore lsb during sort
+//	08/11/10 Port to ise 12
 //-------------------------------------------------------------------------------------------------------------------
 	module best_1of5_busy
 	(

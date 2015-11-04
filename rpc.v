@@ -49,6 +49,10 @@
 //	07/22/09 Remove clock_vme global net to make room for cfeb digital phase shifter gbufs
 //	08/07/09 Revert to 10mhz vme clock
 //	08/12/09 Remove clock_vme again
+//	08/16/10 Port to ISE 12, change to non-blocking operators
+//	08/25/10 Replace async ffs
+//	10/08/10 Add virtex 6 ram option
+//	10/15/10 Replace all rams for virtex 6
 //------------------------------------------------------------------------------------------------------------------
 	module rpc
 	(
@@ -130,6 +134,8 @@
 // Debug
 `ifdef DEBUG_RPC
 	,inj_sm_dsp
+	,rpc_clr
+	,pass_ff
 `endif
 	);
 //------------------------------------------------------------------------------------------------------------------
@@ -149,6 +155,9 @@
 	parameter RAM_DEPTH		= 2048;				// Storage bx depth
 	parameter RAM_ADRB		= 11;				// Address width=log2(ram_depth)
 	parameter RAM_WIDTH		= 8;				// Data width
+
+// Virtex device type
+	`include "firmware_version.v"
 
 //------------------------------------------------------------------------------------------------------------------
 // IO:
@@ -231,7 +240,9 @@
 
 // Debug
 `ifdef DEBUG_RPC
-	output	[71:0]			inj_sm_dsp;			// Injector state machine ascii display
+	output	[47:0]			inj_sm_dsp;			// Injector state machine ascii display
+	output					rpc_clr;
+	output					pass_ff;
 `endif
 
 //------------------------------------------------------------------------------------------------------------------
@@ -263,11 +274,11 @@
 // RPC Demultiplexer:
 //------------------------------------------------------------------------------------------------------------------
 // All-channels mask FF, 1=enable RPC bits, 0=clear in IOB
-	reg rpc_clr;
+	reg rpc_clr=1;
 	
-	always @(posedge clock or posedge global_reset) begin
-	if (global_reset)	rpc_clr = 1'b1;
-	else				rpc_clr = !mask_all;
+	always @(posedge clock) begin
+	if (global_reset) rpc_clr <= 1;
+	else              rpc_clr <= !mask_all;
 	end
 
 	wire sm_reset=global_reset;
@@ -275,13 +286,11 @@
 // Demux RPC 80MHz data from RAT module in DDR IOB FFs, rpc0,1 arrive 1st phase, future rpc2,3 arrive 2nd phase
 	reg	[MXRPCRX-1:0] din1st=0;
 
-	wire aset = 1'b0;
-	wire aclr = rpc_clr;
+	wire sclr = rpc_clr;
 
-	always @(posedge clock or posedge aset or posedge aclr) begin	// Latch 1st-in-time on rising edge
-	if		(aclr)	din1st = {MXRPCRX{1'b0}};		// async clear
-	else if	(aset)	din1st = {MXRPCRX{1'b1}};		// async set
-	else			din1st = rpc_rx[MXRPCRX-1:0];	// sync  store
+	always @(posedge clock) begin	// Latch 1st-in-time on rising edge
+	if (sclr) din1st <= 0;			// sync clear
+	else      din1st <= rpc_rx;		// sync  store
 	end
 
 // Delay RPC raw hits
@@ -294,8 +303,8 @@
 	reg		   rpc1_delay_is_0 = 0;
 
 	always @(posedge clock) begin
-	rpc0_srl_adr 	<= (rpc0_delay - 1);
-	rpc1_srl_adr 	<= (rpc1_delay - 1);
+	rpc0_srl_adr 	<= (rpc0_delay -  1'b1);
+	rpc1_srl_adr 	<= (rpc1_delay -  1'b1);
 	rpc0_delay_is_0	<= (rpc0_delay == 0);	// Use direct input if SRL address is 0, 1st SRL output has 1bx overhead
 	rpc1_delay_is_0	<= (rpc1_delay == 0);
 	end
@@ -325,22 +334,13 @@
 // Injector State Machine
 	wire inj_tbin_cnt_done;
 
-	always @(posedge clock or posedge sm_reset) begin
-
-	if(sm_reset)inj_sm = pass;
+	always @(posedge clock) begin
+	if (sm_reset)                     inj_sm <= pass;
 	else begin
 	case (inj_sm)
-
-	pass:
-	 if (injector_go_rpc)
-	 inj_sm =	injecting;
-
-	injecting:
-	 if (inj_tbin_cnt_done)
-	 inj_sm	=	pass;
-	
-	default
-	 inj_sm	=	pass;
+	pass:      if (injector_go_rpc  ) inj_sm <= injecting;
+	injecting: if (inj_tbin_cnt_done) inj_sm <=	pass;
+	default                           inj_sm <=	pass;
 	endcase
 	end
 	end
@@ -350,92 +350,186 @@
 	wire [9:0]  inj_tbin_adr;	// Injector adr runs 0-1023
 
 	always @(posedge clock) begin
-	if		(inj_sm==pass     ) inj_tbin_cnt = 0;				// Sync  load
-	else if	(inj_sm==injecting) inj_tbin_cnt = inj_tbin_cnt+1;	// Sync  count
+	if		(inj_sm==pass     ) inj_tbin_cnt <= 0;					// Sync  load
+	else if	(inj_sm==injecting) inj_tbin_cnt <= inj_tbin_cnt+1'b1;	// Sync  count
 	end
 
-	assign inj_tbin_cnt_done = (inj_tbin_cnt==inj_last_tbin);	// Counter may wrap past 1024 ram adr limit
-	assign inj_tbin_adr[9:0] = inj_tbin_cnt[9:0];				// injector ram address confined to 0-1023
+	assign inj_tbin_cnt_done = (inj_tbin_cnt==inj_last_tbin);		// Counter may wrap past 1024 ram adr limit
+	assign inj_tbin_adr[9:0] = inj_tbin_cnt[9:0];					// injector ram address confined to 0-1023
 
 // Pass state FF delays output mux 1 cycle
-	reg pass_ff;
+	reg pass_ff=1;
 
-	always @(posedge clock or posedge sm_reset) begin
-	if(sm_reset) pass_ff = 1'b1;
-	else
-	pass_ff = (inj_sm == pass);
+	always @(posedge clock) begin
+	if (sm_reset) pass_ff <= 1;
+	else          pass_ff <= (inj_sm == pass);
 	end
 
-// Injector RAM: RPC Pads, 16 bits x 1024 tbins deep PortA: read/write via VME, PortB: read via injector SM
+// Injector RAM: RPC Pads
+// Port A: rw 16 bits x 1024 tbins, read/write via VME
+// Port B: ro 16 bits via injector SM
 	wire [18:0] rpc_inj	   [1:0];
 	wire [18:0]	inj_rdataa [1:0];
 
+`ifdef VIRTEX2
+	initial $display("rpc: generating Virtex2 RAMB16_S18_S18 ram.uinjpads");
 	genvar i;
 	generate
 	for (i=0; i<=1; i=i+1) begin: ram
-	RAMB16_S18_S18 #(
-	.WRITE_MODE_A		 ("WRITE_FIRST"),		// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.WRITE_MODE_B		 ("WRITE_FIRST"),		// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.SIM_COLLISION_CHECK ("GENERATE_X_ONLY")	// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
-	) uinjpads (
-		.WEA	(inj_wen[i]),					// Port A Write Enable Input
-		.ENA	(1'b1),							// Port A RAM Enable Input
-		.SSRA	(1'b0),							// Port A Synchronous Set/Reset Input
-		.CLKA	(clock),						// Port A Clock
-		.ADDRA	(inj_rwadr[9:0]),				// Port A 10-bit Address Input
-		.DIA	(inj_wdata[15:0]),				// Port A 16-bit Data Input
-		.DIPA	(2'b00),						// Port A 2-bit parity Input
-		.DOA	(inj_rdataa[i][15:0]),			// Port A 16-bit Data Output
-		.DOPA	(),								// Port A 2-bit Parity Output
 
-		.WEB	(1'b0),							// Port B Write Enable Input
-		.ENB	(1'b1),							// Port B RAM Enable Input
-		.SSRB	(1'b0),							// Port B Synchronous Set/Reset Input
-		.CLKB	(clock),						// Port B Clock
-		.ADDRB	(inj_tbin_adr[9:0]),			// Port B 10-bit Address Input
-		.DIB	({16{1'b0}}),					// Port B 16-bit Data Input
-		.DIPB	(2'b00),						// Port B 2-bit parity Input
-		.DOB	(rpc_inj[i][15:0]),				// Port B 16-bit Data Output
-		.DOPB	());
+	RAMB16_S18_S18 #(
+	.WRITE_MODE_A		("READ_FIRST"),					// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.WRITE_MODE_B		("READ_FIRST"),					// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.SIM_COLLISION_CHECK("ALL")							// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
+	) uinjpads (
+	.WEA				(inj_wen[i]),					// Port A Write Enable Input
+	.ENA				(1'b1),							// Port A RAM Enable Input
+	.SSRA				(1'b0),							// Port A Synchronous Set/Reset Input
+	.CLKA				(clock),						// Port A Clock
+	.ADDRA				(inj_rwadr[9:0]),				// Port A 10-bit Address Input
+	.DIA				(inj_wdata[15:0]),				// Port A 16-bit Data Input
+	.DIPA				(2'b00),						// Port A 2-bit parity Input
+	.DOA				(inj_rdataa[i][15:0]),			// Port A 16-bit Data Output
+	.DOPA				(),								// Port A 2-bit Parity Output
+
+	.WEB				(1'b0),							// Port B Write Enable Input
+	.ENB				(1'b1),							// Port B RAM Enable Input
+	.SSRB				(1'b0),							// Port B Synchronous Set/Reset Input
+	.CLKB				(clock),						// Port B Clock
+	.ADDRB				(inj_tbin_adr[9:0]),			// Port B 10-bit Address Input
+	.DIB				({16{1'b0}}),					// Port B 16-bit Data Input
+	.DIPB				(2'b00),						// Port B 2-bit parity Input
+	.DOB				(rpc_inj[i][15:0]),				// Port B 16-bit Data Output
+	.DOPB				());
 	end
 	endgenerate
+
+`elsif VIRTEX6
+	initial $display("rpc: generating Virtex6 RAMB18E1_S18_S18 ram.uinjpads");
+	genvar i;
+	generate
+	for (i=0; i<=1; i=i+1) begin: ram
+
+	RAMB18E1 #(											// Virtex6
+	.RAM_MODE			("TDP"),						// SDP or TDP
+ 	.READ_WIDTH_A		(18),							// 0,1,2,4,9,18,36 Read/write width per port
+	.WRITE_WIDTH_A		(18),							// 0,1,2,4,9,18
+	.READ_WIDTH_B		(18),							// 0,1,2,4,9,18
+	.WRITE_WIDTH_B		(0),							// 0,1,2,4,9,18,36
+	.WRITE_MODE_A		("READ_FIRST"),					// Must be same for both ports in SDP mode: WRITE_FIRST, READ_FIRST, or NO_CHANGE)
+	.WRITE_MODE_B		("READ_FIRST"),
+	.SIM_COLLISION_CHECK("ALL")							// ALL, WARNING_ONLY, GENERATE_X_ONLY or NONE)
+	) uinjpads (
+	.WEA				({2{inj_wen[i]}}),				//  2-bit A port write enable input
+	.ENARDEN			(1'b1),							//  1-bit A port enable/Read enable input
+	.RSTRAMARSTRAM		(1'b0),							//  1-bit A port set/reset input
+	.RSTREGARSTREG		(1'b0),							//  1-bit A port register set/reset input
+	.REGCEAREGCE		(1'b0),							//  1-bit A port register enable/Register enable input
+	.CLKARDCLK			(clock),						//  1-bit A port clock/Read clock input
+	.ADDRARDADDR		({inj_rwadr[9:0],4'hF}),		// 14-bit A port address/Read address input 18b->[13:4]
+	.DIADI				(inj_wdata[15:0]),				// 16-bit A port data/LSB data input
+	.DIPADIP			(),								//  2-bit A port parity/LSB parity input
+	.DOADO				(inj_rdataa[i][15:0]),			// 16-bit A port data/LSB data output
+	.DOPADOP			(),								//  2-bit A port parity/LSB parity output
+
+	.WEBWE				(),								//  4-bit B port write enable/Write enable input
+	.ENBWREN			(1'b1),							//  1-bit B port enable/Write enable input
+	.REGCEB				(1'b0),							//  1-bit B port register enable input
+	.RSTRAMB			(1'b0),							//  1-bit B port set/reset input
+	.RSTREGB			(1'b0),							//  1-bit B port register set/reset input
+	.CLKBWRCLK			(clock),						//  1-bit B port clock/Write clock input
+	.ADDRBWRADDR		({inj_tbin_adr[9:0],4'hF}),		// 14-bit B port address/Write address input 18b->[13:4]
+	.DIBDI				(),								// 16-bit B port data/MSB data input
+	.DIPBDIP			(),								//  2-bit B port parity/MSB parity input
+	.DOBDO				(rpc_inj[i][15:0]),				// 16-bit B port data/MSB data output
+	.DOPBDOP			());							//  2-bit B port parity/MSB parity output
+
+	end
+	endgenerate
+`endif
 
 // Initialize Pad Injector RAMs, INIT values contain preset test pattern
 // Tbin                         	       FFFFEEEEDDDDCCCCBBBBAAAA9999888877776666555544443333222211110000;
 	defparam ram[0].uinjpads.INIT_00 =256'h000F000E000D000C000B000A00090008000700060005000400030002EFABABCD;
 	defparam ram[1].uinjpads.INIT_00 =256'h432f432E432D432C432B432A432943284327432643254324432343224321CCCC;
 
-// Injector RAM: RPC BXN, 16 bits x 1024 tbins deep PortA: read/write via VME, PortB: read via injector SM
+// Injector RAM: RPC BXN
+// Port A: rw  8 bits x 1024 tbins deep, read/write via VME
+// Port B: ro 16 bits read via injector SM
 	wire [7:0]	injbxn_rdataa;
 	wire [7:0]	bxn_inj [1:0];
 
 	wire wen_bxn = |(inj_wen);
 	wire bank01	= (inj_wen[1] | inj_ren[1]);		// bank=0 for inj0, bank=1 for inj1
 
-	RAMB16_S9_S18 #(
-	.WRITE_MODE_A		 ("WRITE_FIRST"),			// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.WRITE_MODE_B		 ("WRITE_FIRST"),			// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.SIM_COLLISION_CHECK ("GENERATE_X_ONLY")		// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
-	) uinjbxn (
-		.WEA	(wen_bxn),							// Port A Write Enable Input
-		.ENA	(1'b1),								// Port A RAM Enable Input
-		.SSRA	(1'b0),								// Port A Synchronous Set/Reset Input
-		.CLKA	(clock),							// Port A Clock
-		.ADDRA	({inj_rwadr[9:0],bank01}),			// Port A 11-bit Address Input
-		.DIA	({5'b00000,inj_wdata[18:16]}),		// Port A 8-bit Data Input
-		.DIPA	(1'b0),								// Port A 1-bit parity Input
-		.DOA	(injbxn_rdataa[7:0]),				// Port A 8-bit Data Output
-		.DOPA	(),									// Port A 1-bit Parity Output
+`ifdef VIRTEX2
+	initial $display("rpc: generating Virtex2 RAMB16_S9_S18 uinjbxn");
+	wire dumbxn=0;
 
-		.WEB	(1'b0),								// Port B Write Enable Input
-		.ENB	(1'b1),								// Port B RAM Enable Input
-		.SSRB	(1'b0),								// Port B Synchronous Set/Reset Input
-		.CLKB	(clock),							// Port B Clock
-		.ADDRB	(inj_tbin_adr[9:0]),				// Port B 10-bit Address Input
-		.DIB	({16{1'b0}}),						// Port B 16-bit Data Input
-		.DIPB	(2'b00),							// Port B 2-bit parity Input
-		.DOB	({bxn_inj[1][7:0],bxn_inj[0][7:0]}),// Port B 16-bit Data Output
-		.DOPB	());
+	RAMB16_S9_S18 #(
+	.WRITE_MODE_A		("READ_FIRST"),						// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.WRITE_MODE_B		("READ_FIRST"),						// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.SIM_COLLISION_CHECK("ALL")								// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
+	) uinjbxn (
+	.WEA				(wen_bxn),							// Port A Write Enable Input
+	.ENA				(1'b1),								// Port A RAM Enable Input
+	.SSRA				(1'b0),								// Port A Synchronous Set/Reset Input
+	.CLKA				(clock),							// Port A Clock
+	.ADDRA				({inj_rwadr[9:0],bank01}),			// Port A 11-bit Address Input
+	.DIA				({5'b00000,inj_wdata[18:16]}),		// Port A 8-bit Data Input
+	.DIPA				(1'b0),								// Port A 1-bit parity Input
+	.DOA				(injbxn_rdataa[7:0]),				// Port A 8-bit Data Output
+	.DOPA				(),									// Port A 1-bit Parity Output
+
+	.WEB				(1'b0),								// Port B Write Enable Input
+	.ENB				(1'b1),								// Port B RAM Enable Input
+	.SSRB				(1'b0),								// Port B Synchronous Set/Reset Input
+	.CLKB				(clock),							// Port B Clock
+	.ADDRB				(inj_tbin_adr[9:0]),				// Port B 10-bit Address Input
+	.DIB				(16'h0000),							// Port B 16-bit Data Input
+	.DIPB				(2'h0),								// Port B 2-bit parity Input
+	.DOB				({bxn_inj[1][7:0],bxn_inj[0][7:0]}),// Port B 16-bit Data Output
+	.DOPB				());
+
+`elsif VIRTEX6
+	initial $display("rpc: generating Virtex6 RAMB18E1_S9_S18 uinjbxn");
+	wire [7:0] dumbxn;
+
+	RAMB18E1 #(												// Virtex6
+	.RAM_MODE			("TDP"),							// SDP or TDP
+ 	.READ_WIDTH_A		(9),								// 0,1,2,4,9,18,36 Read/write width per port
+	.WRITE_WIDTH_A		(9),								// 0,1,2,4,9,18
+	.READ_WIDTH_B		(18),								// 0,1,2,4,9,18
+	.WRITE_WIDTH_B		(0),								// 0,1,2,4,9,18,36
+	.WRITE_MODE_A		("READ_FIRST"),						// Must be same for both ports in SDP mode: WRITE_FIRST, READ_FIRST, or NO_CHANGE)
+	.WRITE_MODE_B		("READ_FIRST"),
+	.SIM_COLLISION_CHECK("ALL")								// ALL, WARNING_ONLY, GENERATE_X_ONLY or NONE)
+	) uinjbxn (
+	.WEA				({2{wen_bxn}}),						//  2-bit A port write enable input
+	.ENARDEN			(1'b1),								//  1-bit A port enable/Read enable input
+	.RSTRAMARSTRAM		(1'b0),								//  1-bit A port set/reset input
+	.RSTREGARSTREG		(1'b0),								//  1-bit A port register set/reset input
+	.REGCEAREGCE		(1'b0),								//  1-bit A port register enable/Register enable input
+	.CLKARDCLK			(clock),							//  1-bit A port clock/Read clock input
+	.ADDRARDADDR		({inj_rwadr[9:0],bank01,3'h7}),		// 14-bit A port address/Read address input  9b->[13:3]
+	.DIADI				({13'h0000,inj_wdata[18:16]}),		// 16-bit A port data/LSB data input
+	.DIPADIP			(),									//  2-bit A port parity/LSB parity input
+	.DOADO				({dumbxn[7:0],injbxn_rdataa[7:0]}),	// 16-bit A port data/LSB data output
+	.DOPADOP			(),									//  2-bit A port parity/LSB parity output
+
+	.WEBWE				(),									//  4-bit B port write enable/Write enable input
+	.ENBWREN			(1'b1),								//  1-bit B port enable/Write enable input
+	.REGCEB				(1'b0),								//  1-bit B port register enable input
+	.RSTRAMB			(1'b0),								//  1-bit B port set/reset input
+	.RSTREGB			(1'b0),								//  1-bit B port register set/reset input
+	.CLKBWRCLK			(clock),							//  1-bit B port clock/Write clock input
+	.ADDRBWRADDR		({inj_tbin_adr[9:0],4'hF}),			// 14-bit B port address/Write address input  18b->[13:4]
+	.DIBDI				(),									// 16-bit B port data/MSB data input
+	.DIPBDIP			(),									//  2-bit B port parity/MSB parity input
+	.DOBDO				({bxn_inj[1][7:0],bxn_inj[0][7:0]}),// 16-bit B port data/MSB data output
+	.DOPBDOP			()									//  2-bit B port parity/MSB parity output
+	);
+`endif
 
 // Initialize BXN Injector RAM, INIT values contain preset test pattern
 	defparam uinjbxn.INIT_00 =256'h432f432E432D432C432B432A432943284327432643254324432343224321ABCD;
@@ -494,35 +588,85 @@
 	wire [RAM_WIDTH-1:0] fifo_rdata [4:0];
 	wire [4:0] dopa;
 
+`ifdef VIRTEX2
+	initial $display("rpc: generating Virtex2 RAMB16_S9_S9 raw.uram");
+
 	generate
 	for (i=0; i<=4; i=i+1) begin: raw
-	RAMB16_S9_S9 #(
-	.WRITE_MODE_A			("READ_FIRST"),		// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.WRITE_MODE_B			("READ_FIRST"),		// WRITE_FIRST, READ_FIRST or NO_CHANGE
-	.SIM_COLLISION_CHECK	("GENERATE_X_ONLY")	// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
-	) rawhits_ram (
-	.WEA			(fifo_wen),					// Port A Write Enable Input
-	.ENA			(1'b1),						// Port A RAM Enable Input
-	.SSRA			(1'b0),						// Port A Synchronous Set/Reset Input
-	.CLKA			(clock),					// Port A Clock
-	.ADDRA			(fifo_wadr),				// Port A 11-bit Address Input
-	.DIA			(fifo_wdata[i]),			// Port A 8-bit Data Input
-	.DIPA			(parity_wr[i]),				// Port A 1-bit parity Input
-	.DOA			(),							// Port A 8-bit Data Output
-	.DOPA			(dopa[i]),					// Port A 1-bit Parity Output
 
-	.WEB			(1'b0),						// Port B Write Enable Input
-	.ENB			(1'b1),						// Port B RAM Enable Input
-	.SSRB			(1'b0),						// Port B Synchronous Set/Reset Input
-	.CLKB			(clock),					// Port B Clock
-	.ADDRB			(fifo_radr),				// Port B 11-bit Address Input
-	.DIB			(8'h00),					// Port B 8-bit Data Input
-	.DIPB			(),							// Port-B 1-bit parity Input
-	.DOB			(fifo_rdata[i]),			// Port B 8-bit Data Output
-	.DOPB			(parity_rd[i])				// Port B 1-bit Parity Output
+	RAMB16_S9_S9 #(
+	.WRITE_MODE_A			("READ_FIRST"),				// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.WRITE_MODE_B			("READ_FIRST"),				// WRITE_FIRST, READ_FIRST or NO_CHANGE
+	.SIM_COLLISION_CHECK	("ALL")						// "NONE", "WARNING_ONLY", "GENERATE_X_ONLY", "ALL"
+	) rawhits_ram (
+	.WEA					(fifo_wen),					// Port A Write Enable Input
+	.ENA					(1'b1),						// Port A RAM Enable Input
+	.SSRA					(1'b0),						// Port A Synchronous Set/Reset Input
+	.CLKA					(clock),					// Port A Clock
+	.ADDRA					(fifo_wadr),				// Port A 11-bit Address Input
+	.DIA					(fifo_wdata[i]),			// Port A 8-bit Data Input
+	.DIPA					(parity_wr[i]),				// Port A 1-bit parity Input
+	.DOA					(),							// Port A 8-bit Data Output
+	.DOPA					(dopa[i]),					// Port A 1-bit Parity Output
+
+	.WEB					(1'b0),						// Port B Write Enable Input
+	.ENB					(1'b1),						// Port B RAM Enable Input
+	.SSRB					(1'b0),						// Port B Synchronous Set/Reset Input
+	.CLKB					(clock),					// Port B Clock
+	.ADDRB					(fifo_radr),				// Port B 11-bit Address Input
+	.DIB					(8'h00),					// Port B 8-bit Data Input
+	.DIPB					(),							// Port-B 1-bit parity Input
+	.DOB					(fifo_rdata[i]),			// Port B 8-bit Data Output
+	.DOPB					(parity_rd[i])				// Port B 1-bit Parity Output
    );
 	end
 	endgenerate
+
+`elsif VIRTEX6
+	initial $display("rpc: generating Virtex6 RAMB18E1_S9_S9 raw.uram");
+	wire [8:0] dum [4:0];
+	assign dopa= 0;										// Virtex6 does not require parity-out if parity-in is used
+
+	generate
+	for (i=0; i<=4; i=i+1) begin: raw
+
+	RAMB18E1 #(											// Virtex6
+	.RAM_MODE			("TDP"),						// SDP or TDP
+ 	.READ_WIDTH_A		(0),							// 0,1,2,4,9,18,36 Read/write width per port
+	.READ_WIDTH_B		(9),							// 0,1,2,4,9,18
+	.WRITE_WIDTH_A		(9),							// 0,1,2,4,9,18
+	.WRITE_WIDTH_B		(0),							// 0,1,2,4,9,18,36
+	.WRITE_MODE_A		("READ_FIRST"),					// Must be same for both ports in SDP mode: WRITE_FIRST, READ_FIRST, or NO_CHANGE)
+	.WRITE_MODE_B		("READ_FIRST"),
+	.SIM_COLLISION_CHECK("ALL")							// ALL, WARNING_ONLY, GENERATE_X_ONLY or NONE)
+	) rawhits_ram  (
+	.WEA				({2{fifo_wen}}),				//  2-bit A port write enable input
+	.ENARDEN			(1'b1),							//  1-bit A port enable/Read enable input
+	.RSTRAMARSTRAM		(1'b0),							//  1-bit A port set/reset input
+	.RSTREGARSTREG		(1'b0),							//  1-bit A port register set/reset input
+	.REGCEAREGCE		(1'b0),							//  1-bit A port register enable/Register enable input
+	.CLKARDCLK			(clock),						//  1-bit A port clock/Read clock input
+	.ADDRARDADDR		({fifo_wadr,3'h7}),				// 14-bit A port address/Read address input
+	.DIADI				({8'h00,fifo_wdata[i]}),		// 16-bit A port data/LSB data input
+	.DIPADIP			({1'b0,parity_wr[i]}),			//  2-bit A port parity/LSB parity input
+	.DOADO				(),								// 16-bit A port data/LSB data output
+	.DOPADOP			(),								//  2-bit A port parity/LSB parity output
+
+	.WEBWE				(),								//  4-bit B port write enable/Write enable input
+	.ENBWREN			(1'b1),							//  1-bit B port enable/Write enable input
+	.REGCEB				(1'b0),							//  1-bit B port register enable input
+	.RSTRAMB			(1'b0),							//  1-bit B port set/reset input
+	.RSTREGB			(1'b0),							//  1-bit B port register set/reset input
+	.CLKBWRCLK			(clock),						//  1-bit B port clock/Write clock input
+	.ADDRBWRADDR		({fifo_radr,3'h7}),				// 14-bit B port address/Write address input
+	.DIBDI				(),								// 16-bit B port data/MSB data input
+	.DIPBDIP			(),								//  2-bit B port parity/MSB parity input
+	.DOBDO				({dum[i][7:0],fifo_rdata[i]}),	// 16-bit B port data/MSB data output
+	.DOPBDOP			({dum[i][8],parity_rd[i]})		//  2-bit B port parity/MSB parity output
+	);
+	end
+	endgenerate
+`endif
 
 // Map read data arrays
 	wire [RAM_WIDTH-1:0] fifo_rdata_rpc0a = fifo_rdata[0];
@@ -596,8 +740,8 @@
 // Apply Hot Channel Mask to block errant RPC pads: 1=enable pad
 	wire [MXRPCPAD-1:0]	rpc_rxm [1:0];
 
-	assign rpc_rxm[0] = rpc_rxdff[0] & rpc0_hcm;
-	assign rpc_rxm[1] = rpc_rxdff[1] & rpc1_hcm;
+	assign rpc_rxm[0] = rpc_rxdff[0][15:0] & rpc0_hcm;
+	assign rpc_rxm[1] = rpc_rxdff[1][15:0] & rpc1_hcm;
 	
 // Count pad hits
 	reg [3:0] rpc_nhits [1:0];
@@ -622,8 +766,8 @@
 	reg [3:0] rpc1_bxn_diff;
 
 	always @(posedge clock) begin
-	rpc0_bxn_diff = rpc_rxdff[0][18:16] - rpc_bxn_offset;
-	rpc1_bxn_diff = rpc_rxdff[1][18:16] - rpc_bxn_offset;
+	rpc0_bxn_diff <= rpc_rxdff[0][18:16] - rpc_bxn_offset;
+	rpc1_bxn_diff <= rpc_rxdff[1][18:16] - rpc_bxn_offset;
 	end
 
 //------------------------------------------------------------------------------------------------------------------
@@ -637,8 +781,11 @@
 
 // Sump
 	assign rpc_sump =		
-	(|injbxn_rdataa[7:3]) | (|dopa)	|
-	(|bxn_inj[0][7:3])    | (|bxn_inj[1][7:3])
+	(|injbxn_rdataa[7:3])	| 
+	(|dopa)					|
+	(|dumbxn)				|
+	(|bxn_inj[0][7:3])		| 
+	(|bxn_inj[1][7:3])
 	;
 
 //------------------------------------------------------------------------------------------------------------------
@@ -646,12 +793,12 @@
 //------------------------------------------------------------------------------------------------------------------
 `ifdef DEBUG_RPC
 // Injector State Machine ASCII display
-	reg[71:0] inj_sm_dsp;
+	reg[47:0] inj_sm_dsp;
 	always @* begin
 	case (inj_sm)
-	pass:		inj_sm_dsp <= "pass     ";
-	injecting:	inj_sm_dsp <= "injecting";
-	default		inj_sm_dsp <= "pass     ";
+	pass:		inj_sm_dsp <= "pass  ";
+	injecting:	inj_sm_dsp <= "inject";
+	default		inj_sm_dsp <= "pass  ";
 	endcase
 	end
 `endif

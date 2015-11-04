@@ -10,6 +10,7 @@
 //	05/16/07 Port from cylon9, add rate
 //	08/11/09 Replace 10MHz clock_vme with  40MHz clock, increase prescale counter by 2 bits
 //	04/22/10 Port to ise 11, add FF to srl output to sync with gsr
+//	07/09/10 Port to ise 12
 //--------------------------------------------------------------------------------------------------------
 	module cylon2 (clock,rate,q);
 

@@ -11,11 +11,14 @@
 //	09/13/06 Mod for xst
 //	09/18/06 Replace instances with generate loop
 //	03/07/07 Remove former port map names
+//	07/22/10 Port to ise 12
+//	10/05/10 Sim check
 //-----------------------------------------------------------------------------------------------------------------------
-	module srl16e_bbl(clock,ce,adr,d,q);
+	module srl16e_bbl (clock,ce,adr,d,q);
 
 // Generic
-	parameter	WIDTH = 19;		// Parallel bus width
+	parameter WIDTH = 19;
+	initial	$display("srl16e_bbl: WIDTH=%d",WIDTH);
 
 // Ports
 	input				clock;

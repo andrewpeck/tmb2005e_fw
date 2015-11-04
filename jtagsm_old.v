@@ -59,6 +59,7 @@
 //	06/26/08 Add tckcnt_ok to conform to version v2
 //	08/19/08 Conform to jtagsm_new port list
 //	01/12/09 Mod for ISE 10.1i
+//	08/23/10 Port to ise 12, add register init, remove async ffs
 //-----------------------------------------------------------------------------------------------------------------
 	module jtagsm_old
 	(
@@ -214,11 +215,12 @@
 	output			check_flag;
 	output			latch_prom_data;
 `endif
+
 //-----------------------------------------------------------------------------------------------------------------
 // Local
 //-----------------------------------------------------------------------------------------------------------------
 // State Machine declarations
-	reg	[3:0] prom_sm;
+	reg	[9:0] prom_sm;
 
 	parameter wait_dll		=	4'h0;
 	parameter wait_vme		=	4'h1;
@@ -238,20 +240,20 @@
 // Main Logic Section
 //-----------------------------------------------------------------------------------------------------------------
 // FF buffer state machine trigger inputs
-	reg	power_up_ff;
-	reg vme_ready_ff;
-	reg	start_ff;
-	reg	autostart_ff;
+	reg	power_up_ff  = 0;
+	reg vme_ready_ff = 0;
+	reg	start_ff     = 0;
+	reg	autostart_ff = 0;
 
 	always @(posedge clock) begin
-	power_up_ff		<= power_up;
-	vme_ready_ff	<= vme_ready;
-	start_ff		<= start;
-	autostart_ff	<= autostart;
+	power_up_ff  <= power_up;
+	vme_ready_ff <= vme_ready;
+	start_ff     <= start;
+	autostart_ff <= autostart;
 	end
 
 // Signal busy if not idling or waiting for unstart
-	reg busy;
+	reg busy=0;
 
 	wire busy_en = (prom_sm != idle) && (prom_sm != unstart) && vme_ready_ff;
 
@@ -260,45 +262,45 @@
 	end
 
 // Control signals to the active PROM
-	reg	 prom_clk;
-	reg  prom_oe;
-	reg	 prom_nce;
+	reg	 prom_clk = 0;
+	reg  prom_oe  = 1;
+	reg	 prom_nce = 1;
 	wire prom_end;
 
 	wire clear_adr = (prom_sm == reset_adr);
 	wire next_adr  = (prom_sm == latch_prom) && !prom_end;
 	wire idle_prom = (prom_sm == idle) || (prom_sm == unstart);
 
-	always @(posedge clock or posedge global_reset) begin
+	always @(posedge clock) begin
 	if (global_reset) begin
-	prom_clk = 0;
-	prom_oe  = 1;
-	prom_nce = 1;
+	prom_clk <= 0;
+	prom_oe  <= 1;
+	prom_nce <= 1;
 	end
 	else if (clear_adr) begin
-	prom_clk = 0;	// take clock low, it was prolly idle high
-	prom_oe	 = 0;	// 0=reset address, outputs disabled
-	prom_nce = 0;	// 0=chip selected
+	prom_clk <= 0;	// take clock low, it was prolly idle high
+	prom_oe	 <= 0;	// 0=reset address, outputs disabled
+	prom_nce <= 0;	// 0=chip selected
 	end
 	else if (idle_prom) begin
-	prom_clk = 0;	// take clk low for idling
-	prom_oe	 = 1;	// 0=reset address, outputs disabled
-	prom_nce = 1;	// 1=chip not selected
+	prom_clk <= 0;	// take clk low for idling
+	prom_oe	 <= 1;	// 0=reset address, outputs disabled
+	prom_nce <= 1;	// 1=chip not selected
 	end
 	else if (next_adr) begin
-	prom_clk = 1;	// advance address
-	prom_oe	 = 1;	// 1=outputs enabled
-	prom_nce = 0;	// 0=chip selected
+	prom_clk <= 1;	// advance address
+	prom_oe	 <= 1;	// 1=outputs enabled
+	prom_nce <= 0;	// 0=chip selected
 	end
 	else begin
-	prom_clk = 0;	// take clk low 
-	prom_oe	 = 1;	// 0=reset address, outputs disabled
-	prom_nce = 0;	// 1=chip not selected
+	prom_clk <= 0;	// take clk low 
+	prom_oe	 <= 1;	// 0=reset address, outputs disabled
+	prom_nce <= 0;	// 1=chip not selected
 	end
 	end
 
 // Latch PROM data
-	reg [7:0] prom_data_ff;
+	reg [7:0] prom_data_ff=0;
 
 	wire blank_data = 
 	(prom_sm == wait_dll)	||
@@ -310,8 +312,8 @@
 	wire latch_prom_data = (prom_sm==latch_prom);
 	
 	always @(posedge clock) begin
-	if(blank_data)		prom_data_ff <= 0;
-	if(latch_prom_data)	prom_data_ff <= prom_data;
+	if (blank_data     ) prom_data_ff <= 0;
+	if (latch_prom_data) prom_data_ff <= prom_data;
 	end
 
 // Decode control word from PROM
@@ -324,11 +326,11 @@
 	assign prom_end		 = (prom_data_ff[7:0] == 8'hFF) || abort;
 
 // Transfer PROM data to JTAG chain
-	reg			tdi;
-	reg			tms;
-	reg			tck;
-	reg	[3:0]	sel;
-	reg			jtag_oe;
+	reg			tdi     = 0;
+	reg			tms     = 0;
+	reg			tck     = 0;
+	reg	[3:0]	sel     = 4'hC;
+	reg			jtag_oe = 0;
 
 	wire check_flag = (prom_sm==latch_prom);
 	wire jtag_blank = blank_data || abort || !jtag_frame || wdcnt==0;
@@ -352,57 +354,57 @@
 	end
 
 // Init delay counter waits 2uS after asserting /CE low per Xilinx datasheet
-	reg [6:0] init_cnt;
+	reg [6:0] init_cnt=0;
 
 	wire init_cnt_en = (prom_sm  == init);
 	wire init_done   = (init_cnt == 80);
 
 	always @(posedge clock) begin
-	if (init_cnt_en) init_cnt = init_cnt+1;
-	else init_cnt = 0;
+	if (init_cnt_en) init_cnt <= init_cnt+1'b1;
+	else             init_cnt <= 0;
 	end
 
 // Address reset delay counter asserts reset 250nS per Xilinx datasheet
-	reg [3:0] reset_cnt;
+	reg [3:0] reset_cnt=0;
 
 	wire reset_cnt_en = (prom_sm == reset_adr);
 	wire reset_done   = (reset_cnt == 10);
 
 	always @(posedge clock) begin
-	if (reset_cnt_en) reset_cnt = reset_cnt+1;
-	else reset_cnt = 0;
+	if (reset_cnt_en) reset_cnt <= reset_cnt+1'b1;
+	else              reset_cnt <= 0;
 	end
 
 // Word counter, counts from BA to FA markers, inclusive, 512K PROMs have 512K/8=64K addresses
-	reg [15:0] wdcnt;
-	reg [3:0] trailer_cnt;
+	reg [15:0] wdcnt      = 0;
+	reg [3:0] trailer_cnt = 0;
 
 	wire wdcnt_cnt_en = check_flag && !trailer_busy;
 	wire wdcnt_clear  = (prom_sm == wait_dll) || (prom_sm == init) || sreset;
 	
 	always @(posedge clock) begin
-	if (wdcnt_cnt_en) wdcnt = wdcnt+1;
-	if (wdcnt_clear ) wdcnt = 0;
+	if (wdcnt_cnt_en) wdcnt <= wdcnt+1'b1;
+	if (wdcnt_clear ) wdcnt <= 0;
 	end
 
 // Checksum accumulator adds data starting from BA marker to the last word-count frame, inclusive
-	reg [7:0] cksum;
+	reg [7:0] cksum=0;
 
-	wire cksum_cnt_en	= check_flag && (trailer_cnt < 5);
+	wire cksum_cnt_en = check_flag && (trailer_cnt < 5);
 	wire cksum_clear  = (prom_sm == wait_dll) || (prom_sm == init) || sreset;
 	
 	always @(posedge clock) begin
-	if (cksum_cnt_en) cksum = cksum + prom_data_ff;
-	if (cksum_clear ) cksum = 0;
+	if (cksum_cnt_en) cksum <= cksum + prom_data_ff;
+	if (cksum_clear ) cksum <= 0;
 	end
 
 // First frame marker must be present else state machine stops
-	reg abort_ff;
+	reg abort_ff=0;
 
 	wire abort_clear = (prom_sm == wait_dll) || (prom_sm == wait_vme) || (prom_sm == idle);
 
 	always @(posedge clock) begin
-	if (abort_clear) abort_ff <=0;
+	if (abort_clear) abort_ff <= 0;
 	if (check_flag ) abort_ff <= abort;
 	end
 
@@ -414,16 +416,16 @@
 	assign trailer_busy  	 = (trailer_cnt != 0) || trailer_frame;
 
 	always @(posedge clock) begin
-	if (trailer_cnt_en)		trailer_cnt = trailer_cnt+1;
-	if (trailer_cnt_clear)	trailer_cnt = 0;
+	if (trailer_cnt_en)		trailer_cnt <= trailer_cnt+1'b1;
+	if (trailer_cnt_clear)	trailer_cnt <= 0;
 	end
 
 // Trailer frame storage
-	reg [15:0] wdcnt_prom;
-	reg	[7:0]  cksum_prom;
+	reg [15:0] wdcnt_prom=0;
+	reg	[7:0]  cksum_prom=0;
 
 	always @(posedge clock) begin
-	if(trailer_busy && prom_sm==inc_adr) begin
+	if   (trailer_busy && prom_sm==inc_adr) begin
 	case (trailer_cnt)
 	4'd1:	wdcnt_prom[15:12]	<= prom_data_ff[3:0];
 	4'd2:	wdcnt_prom[11:8]	<= prom_data_ff[3:0];
@@ -433,16 +435,16 @@
 	4'd6:	cksum_prom[3:0]		<= prom_data_ff[3:0];
 	endcase
 	end
-	if(prom_sm==wait_dll || prom_sm==idle) begin
-	wdcnt_prom<=0;
-	cksum_prom<=0;
+	if (prom_sm==wait_dll || prom_sm==idle) begin
+	wdcnt_prom <= 0;
+	cksum_prom <= 0;
 	end
 	end
 
 // JTAG speed throttle
-	reg [3:0]	throttle_ff;
-	reg	[3:0]	throttle_cnt;
-	reg			throttle_en;
+	reg [3:0]	throttle_ff  = 0;
+	reg	[3:0]	throttle_cnt = 0;
+	reg			throttle_en  = 0;
 
 	always @(posedge clock) begin
 	throttle_ff <= throttle;
@@ -452,43 +454,43 @@
 	wire throttle_cnt_en = (prom_sm == persist);
 
 	always @(posedge clock) begin
-	if (throttle_cnt_en)throttle_cnt = throttle_cnt+1;
-	else				throttle_cnt = 0;
+	if (throttle_cnt_en) throttle_cnt <= throttle_cnt+1'b1;
+	else                 throttle_cnt <= 0;
 	end
 
 	wire throttle_done = (throttle_cnt == throttle_ff);
 
 // Status flags
-	reg tckcnt_ok;
-	reg wdcnt_ok;
-	reg cksum_ok;
-	reg jtagsm_ok;
-	reg aborted;
+	reg tckcnt_ok = 0;
+	reg wdcnt_ok  = 0;
+	reg cksum_ok  = 0;
+	reg jtagsm_ok = 0;
+	reg aborted   = 0;
 
-	wire latch_status = (prom_sm == unstart);
+	wire latch_status = (prom_sm == unstart );
 	wire clear_status = (prom_sm == wait_dll) || (prom_sm == init) || sreset;
 
 	always @(posedge clock) begin
 	if (latch_status) begin
-	tckcnt_ok= (wdcnt == wdcnt_prom) && !abort;
-	wdcnt_ok = (wdcnt == wdcnt_prom) && !abort;
-	cksum_ok = (cksum == cksum_prom) && !abort;
-	jtagsm_ok= (wdcnt == wdcnt_prom) && (cksum == cksum_prom) && !abort && (tck_fpga_cnt != 0);
-	aborted  = abort;
+	tckcnt_ok <= (wdcnt == wdcnt_prom) && !abort;
+	wdcnt_ok  <= (wdcnt == wdcnt_prom) && !abort;
+	cksum_ok  <= (cksum == cksum_prom) && !abort;
+	jtagsm_ok <= (wdcnt == wdcnt_prom) && (cksum == cksum_prom) && !abort && (tck_fpga_cnt != 0);
+	aborted   <= abort;
 	end
 	if (clear_status) begin
-	tckcnt_ok= 0;
-	wdcnt_ok = 0;
-	cksum_ok = 0;
-	jtagsm_ok= 0;
-	aborted  = 0;
+	tckcnt_ok <= 0;
+	wdcnt_ok  <= 0;
+	cksum_ok  <= 0;
+	jtagsm_ok <= 0;
+	aborted   <= 0;
 	end
 	end
 
 // FPGA JTAG TCK counter to check that state machine can write to jtag chain 4'hC
-	reg [3:0]	tck_fpga_cnt;
-	reg	[1:0]	tck_fpga_ff;
-	reg			tck_fpga_ok;
+	reg [3:0]	tck_fpga_cnt = 0;
+	reg	[1:0]	tck_fpga_ff  = 0;
+	reg			tck_fpga_ok  = 0;
 
 	always @(posedge clock) begin
 	if (prom_sm != idle) begin
@@ -502,61 +504,61 @@
 	wire tck_fpga_cnt_en   = tck_fpga_ticked && !tck_fpga_cnt_done; // stop counter at full scale
 
 	always @(posedge clock) begin
-	if (clear_status)	tck_fpga_cnt = 0;
-	if (tck_fpga_cnt_en)tck_fpga_cnt = tck_fpga_cnt+1;
+	if (clear_status   ) tck_fpga_cnt <= 0;
+	if (tck_fpga_cnt_en) tck_fpga_cnt <= tck_fpga_cnt+1'b1;
 	end
 
 	always @(posedge clock) begin
-	if (clear_status) tck_fpga_ok = 0;
-	if (latch_status) tck_fpga_ok = (tck_fpga_cnt != 0);
+	if (clear_status) tck_fpga_ok <= 0;
+	if (latch_status) tck_fpga_ok <= (tck_fpga_cnt != 0);
 	end
 
 //-----------------------------------------------------------------------------------------------------------------
 //  PROM-Reader State machine
 //-----------------------------------------------------------------------------------------------------------------
 	always @(posedge clock) begin
-	if		(global_reset)	prom_sm = wait_dll;
-	else if	(sreset     )	prom_sm = idle;
-	else begin
 
+	if      (global_reset) prom_sm <= wait_dll;
+	else if	(sreset      ) prom_sm <= idle;
+	else begin
 	case (prom_sm)
 	
 	wait_dll:										// Wait for FPGA DLLs to lock
-	 if (power_up_ff)	prom_sm = wait_vme;			// FPGA is ready
+	 if (power_up_ff)	prom_sm <= wait_vme;		// FPGA is ready
 
 	wait_vme:										// Wait for VME registers to load
 	 if (vme_ready_ff)								// VME loaded from PROM
 	 begin
-	 if (autostart_ff)	prom_sm = init;				// Start cycle if autostart enabled
-	 else				prom_sm = idle;				// Otherwise stay idle
+	 if (autostart_ff)	prom_sm <= init;			// Start cycle if autostart enabled
+	 else				prom_sm <= idle;			// Otherwise stay idle
 	 end
 
 	idle:											// Wait for VME command to program, power down PROM
-	 if (start_ff)		prom_sm = init;				// Start arrived
+	 if (start_ff)		prom_sm <= init;			// Start arrived
 
 	init:
-	 if (init_done)		prom_sm = reset_adr;		// Power up PROM, 2uS delay
+	 if (init_done)		prom_sm <= reset_adr;		// Power up PROM, 2uS delay
 
 	reset_adr:
-	 if (reset_done)	prom_sm = prom_taccess;		// Reset PROM address, 250nS delay
+	 if (reset_done)	prom_sm <= prom_taccess;	// Reset PROM address, 250nS delay
 	
-	prom_taccess:		prom_sm = latch_prom;		// Relase reset, wait for output to assert 10ns minimum
+	prom_taccess:		prom_sm <= latch_prom;		// Relase reset, wait for output to assert 10ns minimum
 
-	latch_prom:			prom_sm = inc_adr;			// Latch PROM data
+	latch_prom:			prom_sm <= inc_adr;			// Latch PROM data
 
 	inc_adr:										// Increment PROM address
-	 if (prom_end)		prom_sm = unstart;			// First-word marker missing or hit end of PROM data
+	 if (prom_end)		prom_sm <= unstart;			// First-word marker missing or hit end of PROM data
 	 else 
-	 if (throttle_en)	prom_sm = persist;			// JTAG runs at slower speed
-	 else				prom_sm = latch_prom;		// JTAG runs at full speed
+	 if (throttle_en)	prom_sm <= persist;			// JTAG runs at slower speed
+	 else				prom_sm <= latch_prom;		// JTAG runs at full speed
 
 	persist:
-	 if (throttle_done)	prom_sm = latch_prom;		// JTAG speed decrease
+	 if (throttle_done)	prom_sm <= latch_prom;		// JTAG speed decrease
 
 	unstart:
-	 if(!start_ff)		prom_sm = idle;				// Wait for VME write command to go away
+	 if (!start_ff)		prom_sm <= idle;			// Wait for VME write command to go away
 
-	default				prom_sm = wait_dll;
+	default				prom_sm <= wait_dll;
 	endcase
 	end
 	end

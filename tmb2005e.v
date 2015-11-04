@@ -3,292 +3,297 @@
 //-------------------------------------------------------------------------------------------------------------------
 //	tmb2005e:	Top Level
 //-------------------------------------------------------------------------------------------------------------------
-//	03/12/03 Initial: Ported TMB2003a from tmb2001a+cfebreqst
-//	03/13/03 New TTC decodes in ccb.v
-//	03/14/03 Gpio1 pulldown moved to gpio0, cylon waits for phos4
-//	03/15/03 Sequencer mods for l1reset, scope clock changed, onboard LEDs pup, replace ccb_bx0 with decode
-//	03/16/03 Sequencer mod for l1a leds, vme fix for seqmod
-//	03/17/03 Minor mods to VME section, add phos4_busy_done to phos4_lock
-//	03/17/03 Add dmb_busy to scope
-//	03/19/03 Fix cfebs_exist, un-reverse crc22, latch la1_tx at xtmb+1 instead of pretrig
-//	03/25/03 Fix active_feb_flag double pulse, add invp to scope, add start trigger on bx0 to ccb.v
-//	04/04/03 Sequencer outputs dmb data available after l1a window closes, replaces 1st word flag
-//	04/15/03 Sequencer mods for dmb_dav and bxn at l1a to fix dav failure on 2nd l1a within 75ns
-//	04/17/03 Shorten max bxn from 3564 to 924 for CERN beam test
-//	04/22/03 Mod alct.v to set wr_fifo high when disabled by VME
-//	04/29/03 LHC_CYCLE changed from parameter to VME programmable, added ttc_bxreset
-//	04/30/03 Add mpc_accept_tp for scope display
-//	05/05/03 Fix cfeb_v8 hs ds selection rule
-//	05/06/03 Use hs_thresh_ff for hs ds selection instead of hs_thresh, add pipeline ff to cfeb_v8.v, alas
-//	05/07/03 Add new scope signals
-//	05/08/03 Mods for scope v1h
-//	05/12/03 New scope channels, add cfebn_hsds tag to pretrigger
-//	05/13/03 Add scope96
-//	05/16/03 Add sequencer readout of scope96
-//	05/19/03 Don't allow scope nrams to be programmable
-//	05/20/03 Fix ram mux in scope96 for auto mode
-//	05/22/03 Mod vme.v for usr_jtag to match boot register, swap tdi tdo port directions
-//	05/27/03 Re-allow scope nrams to be programmable because OSUs DMB fails to read large events
-//	06/04/03 Add led_flash_rate and overload nl1a to show buffers full
-//	09/11/03 Moved mpc_accept_tp and mpc_accept_vme from tmb.v to sequencer, removed FF enables
-//	09/12/03 Add allowpretrignoflush to allow next pretrig without flushing after a nobuffer pretrig 
-//	10/06/03 Ported from TMB2003a
-//	03/11/04 Updates from bdtestv3.v, new ddd.v, new clock3.v, new dsn.v, new rpc signals
-//	03/15/04 Convert all 80MHz inputs to DDR
-//	04/12/04 Un-inverted tmb_cfg_done beco no pull-ups on TMB
-//	04/13/04 Re-invert tmb_cfg_done beco GTL drivers have bus hold
-//	04/19/04 Clear alct ram word count on vme reset
-//	04/19/04 Revert alct_rx from DDR to 80MHz, had sync err on some bits for unknown reason
-//	04/20/04 Revert all DDR to 80MHz, 4/19 mod failed in PAR
-//	04/26/04 Add raw hits readout for RPC data
-//	04/28/04 Add rpc raw hits delay
-//	05/06/04 New rpc unit
-//	05/12/04 More rpc mods
-//	05/20/04 Add RPC to sequencer, and VME
-//	05/21/04 Change rpc injector defaults
-//	05/24/04 Mod sequencer readout machine to skip empty RPCs
-//	05/25/04 Tuning RPC readout
-//	06/07/04 Fix tmb.v injector and 1st clct window latching error, change to x_demux_v2, has aset for mpc
-//	06/08/04 Mod vme.v csc_id logic
-//	06/09/04 Change RAT delay default to 9, change -1 logic in sequencer to avoid 32-bit underflow
-//	06/10/04 Add programmable mpc barrel shifter delay
-//	06/17/04 Add programmable scope trigger channel, vme uses direct _ga for board_id default
-//	07/23/04 Add nph_pattern to header
-//	07/30/04 Add crc checking for alct raw hits
-//	08/03/04 Add event counters
-//	08/04/04 Fix l1a counter
-//	08/06/04 Add mpc accept counters
-//	08/09/04 Add oneshot to alct ext_trig and ext_inject
-//	08/18/04 Change alct_ccb_ext_trig_en default to 0
-//	08/23/04 Add alct registers for alct board debug firmware
-//	08/25/04 separate ccb_clock40_enable from alct_clock_enable
-//	08/26/04 Add counter stop if any overflows
-//	08/30/04 Add alct_ext_trig bypass similar to clct for blocked ccb
-//	08/31/04 Add alct lct error counter for alct debug firmware
-//	09/01/04 Fix alct err counter
-//	10/01/04 Add scp_auto to header
-//	10/04/04 Poobah demands ttc_bx0 sent to mpc instead of bx0_local
-//	10/05/04 Add alct crc error test point for oscope trigger
-//	11/15/04 New power-up defaults for RAT2004A
-//	04/21/05 Mods for tmb2005a prototype, add mez test points
-//	06/09/05 Mods for TMB2005 new signal assignments:
-//			alct_front_rear	--> alct_rxoe
-//			_alct_oe			--> alct_txoe
-//			rpc_rxalt[0]		-->	rpc_smbrx
-//			rpc_rxalt[1]		--> rpc_dsn  (aliases rpc_free_rx0, alct_rx[30])
-//			alct_rx[29]			--> rpc_done (shares gp_io[4])
-//			boot[13]			--> rpc_hard_reset
-//	06/10/05 Temporarily flip led_fp for proto board
-//	06/15/05 Make loopback reg bits alct_txoe and alct_rxoe readonly for lazy software programmers
-//	06/17/05 Change version ID to E for tmb2005
-//	08/05/05 Change default alct_status_en and clct_status_en to off for multi-TMB-in-crate
-//	08/05/05 Fix cnt_tmb_nol1a no connected
-//	08/08/05 Tri-state ccb if gtl_loop or ccb_status_oe to prevent bus contention, change _ccb_status_ to ccb_status_oe
-//	09/09/05 Unflip leds for production boards
-//	02/27/06 Updated date codes, compile with 12mA mpc drive per riceu tests
-//	03/17/06 Float usr jtag io after hard reset so u76 device-type can be detected
-//	04/24/06 Add jtag state machine to read alct prom
-//	05/19/06 Add active_feb_flag blanking for disabled CFEBs per OSU request
-//	05/22/06 Mod sequencer to block clct pattern triggers from disabled cfebs
-//	05/24/06 Add alct dav etc to scope
-//	05/25/06 bug fixes for cfeb_en
-//	07/26/06 Add vmesm state machine
-//	07/27/06 Add uptimer and health bits to raw hits header
-//	08/02/06 Add layer trigger mode
-//	08/07/06 Mod ddd to wait for vme state machine to finish
-//	08/15/06 Remove ff from layer_trig signal to speed up by 1 clock
-//	08/28/06 Add ddd_rat for RAT module, rename ddd to ddd_tmb
-//  08/30/06 Add clct and alct bxns to vme readout
-//	08/31/06 Fix missing default writes in vme.v
-//	09/01/06 Fix rpc_dsn iob in rpc.v and vme.v
-//	09/11/06 Port from FND 4.2 to ISE 8.2
-//	09/15/06 XST mods to cfeb,scope
-//	09/18/06 XST mods to ramlut
-//	09/25/06 XST mods to tmb.v, x_delay.v, x_delay_os.v
-//	10/02/06 Mod vmesm to remove autostart ff because its always set by parameter
-//	10/03/06 Change ramult.v from explict reference to xst inferred rams
-//	10/04/06 Mods to cfeb.v replace for-loops, use generate statement for triad_decoders
-//	10/04/06 Power-up mods for xst in vme.v
-//	10/04/06 Set ffs=0 init value. XST should be doing that, but does not
-//	10/04/06 Restructure cmd decoder loop in ccb.v
-//	10/05/06 Replace for-loops with while-loops for xst in clct_fifo.v, rpc.v, and sequencer.v
-//	10/06/06 Add ise version register
-//	10/09/06 Convert rpc.v to ddr
-//	10/10/06 Replace 80mhz mux and demux with 40mhz ddr, change bufg to bufgmux for virtex2
-//	10/11/06 Cylon now uses srl init
-//	10/11/06 reg=0 mods to sequencer, vme jen
-//	10/16/06 Temporarily revert triad persistence to 6-1=5 for software compatibility
-//	10/16/06 Unrevert, so persitence is now 6=6
-//	10/17/06 Add first_pat to scope
-//	10/20/06 Add l1a window position to header22 in sequencer.v
-//	10/20/06 Fix l1a received counter in sequencer.v
-//	10/23/06 Mods to l1a window position counter in sequencer.v
-//	10/24/06 More mods to l1a window position logic
-//	10/25/06 Yet more mods to l1a window position logic
-//	11/22/06 Mod scope channels in sequencer.v
-//	11/27/06 More scope channel mods
-//	11/28/06 Fix resolver.v cfeb3/cfeb4 boundary logic to delete cfeb4 correctly
-//	12/06/06 New triad_decoder.v zero deadtime decoder machine, extending hs pulses
-//	01/09/07 Change synthesis attribute in triad_decoder
-//	02/12/07 Mod sequencer to set all_cfebs_active only for cfebs enabled for readout
-//	04/06/07 Reduce RPC arrays from 2 to 4, updated rpc.v with 1bx faster rat demux
-//	04/09/07 Add mpc_oe to tmb.v and vme.v
-//	04/27/07 Remove alct+cfeb+mpc rx sync stages, shifts rx clocks by 12.5ns
-//	04/27/07 Mod ccb.v fmm state machine, ttc_l1reset renamed to ttc_resync, add ignore ttc_start/stop bit
-//	04/30/07 Revert mpc rx sync stage, because we can't shift mpc rx data by the necessary half cycle for ddr2
-//	05/15/07 Pattern finder a/b multiplexer select trials
-//	05/16/07 Forced init on a/b multiplexer select and moved signal from lut to 80mhz ff
-//	05/21/07 Shorten tmb.v by 2bx, blank mpc quality if no valid lct
-//	05/22/07 Reduce to just one vme clct separation parameter, add triad skip counter
-//	05/23/07 Mod pattern 3 ly5 to mirror pattern 2 in pattern_unit
-//	05/25/07 Fix persist1 signal in cfeb.v
-//	06/13/07 Change pattern_finder a/b commutation to use new direct clock mirror from dcm
-//	06/14/07 Replace a/b commutation with logic accissible clock, add serial fanout in pattern finder
-//	06/20/07 Replace pattern finder with integrated layer-trigger version, shifts pattern IDs +2
-//	06/21/07 Add bit to block writes to adr 10 to allow parallel downloads to selected alcts
-//	06/22/07 Increase tmb match timeout in sequencer.v beco clct_width is temporarily 7bx
-//	07/02/07 Change key layer from ly3 to ly2. Revert tmb timeouts temporarily until checked in simulator
-//	07/02/07 Mod pattern_unit.v to match prior ly3 result, reduces fpga usage from 93% to 90%
-//	07/03/07 Mod pid_thresh_pretrig AND logic in pattern_finder
-//	07/05/07 Fix adjcfeb logic, extend masks to span full cfeb, increase adjcfeb_dist to 6 bits
-//	07/10/07 Increase tmb match timeout, but make clct_sm wait before re-arming for new event, else get wrong tmb buf
-//	07/16/07 Update alct.v rams and state machines, add global reset input
-//	07/18/07 Update tmb.v rams and state machines
-//	07/19/07 Swap tmb.v mpc injector ram frames
-//	07/20/07 Revert mpc ram, too many problems with asymmetric ports
-//	07/23/07 New scope.v and sequencer.v with fewer rams, increase scope from 256tbins to 512
-//	07/25/07 New rpc.v injector rams, new mpc ram, solved asymmetric ports problem
-//	07/26/07 Mod rpc.v bxn ram, delay injector_go_rpc 1bx to match cfeb raw hits
-//	07/30/07 Fix rpc.v bxn ram sump OR
-//	07/31/07 Increase tmb match timeout again, extend count to 5 bits, to allow for clct_width=15 but not 16 (ie 0)
-//	08/03/07 Return scope channels to normal assignments, fix alct dangling ram warning
-//	08/10/07 Replace sequencer.v and tmb.v, new rams, fix tmb_trig_pulse to handle no-match when set to match-only
-//	08/10/07 Replace scope with 512 tbin version to work with new sequencer.v
-//	08/13/07 Swap in x-version, add buffer reset counter
-//	08/22/07 New header/trailer format in sequencer.v
-//	08/23/07 New crc in alct.v
-//	08/24/07 Header debugging
-//	08/27/07 Bugfix in sequencer sump
-//	08/28/07 More header debugging
-//	08/29/07 Yet more header debugging
-//	08/30/07 Header mods, expand year in revcode
-//	08/31/07 Header mods, increase vme counter width
-//	09/04/07 Consolidate counter widths
-//	09/06/07 Delay pretrig and trig counters 1bx in sequencer.v
-//	09/07/07 Fix header 22,37,38 + alct counter
-//	09/10/07 Mod trigpath check logic from alct.v, add tmb matching details to header, restructure vme counters
-//	09/11/07 Increment readout counter 1bx earlier, add temporary debug channels to scope
-//	09/12/07 Latch tmb dupe signals using mpc data strobe, which is 1bx later than matching info
-//	09/13/07 Add alct ddr constraints, add no alct counter, mod alct trig path errors, remove tmb dupe ffs
-//	09/14/07 Injected alct now counts as alct received in alct.v, sequencer.v revert to normal scope signals
-//	09/17/07 Big raw hits buffer version started
-//	09/18/07 Convert 5 cfeb instances to 1 gen loop
-//	09/19/07 Replace rpc.v with big buffer version, increase inj_rwadr width
-//	09/25/07 Replace clct_fifo with big buffer version
-//	10/01/07 New clct_fifo with conforming cfeb and rpc sections
-//	10/04/07 Subtract read address offset from fifo ram read address to compensate for pre-trigger latency
-//	10/09/07 Conform sequencer crc logic to ddu, skip de0f marker because ddu logic fails to include it
-//	10/11/07 Conform alct crc logic to ddu's inferior algorithm
-//	10/15/07 Replace clct_fifo section with cfeb and rpc timing mods
-//	10/16/07 Remove OR of 2 high order tbin bits in of raw hits stream, just let 4-bit tbin markers wrap at 16
-//	10/29/07 Replace distributed header rams with block rams
-//	11/02/07 Replace sequencer.v and tmb.v, mod vme.v to replace timeout counters with phase reply counters
-//	12/12/07 Add new buffer control logic module, remove old code from clct_fifo module
-//	12/14/07 New buffer status signals, rename clct_fifo
-//	12/18/07 Add inhibit for auto buffer reset
-//	12/20/07 Replace L1A stack
-//	12/21/07 L1A bug fixes
-//	01/24/08 Replace buf write/read modules, replace l1a section of sequencer, replace lct quality
-//	01/28/08 Changed wr_buf_adr_l1a to wr_adr_l1a in sequencer.v
-//	01/31/08 Remove 2bx FF delay in alct.v, route alcts to seqencer instead of tmb.v
-//	02/01/08 Add parity to cfeb and rpc raw hits rams for seu detection
-//	02/04/08 Move parity to separate module
-//	02/05/08 Replace inferred raw hits rams with instantiated ram, xst fails to build dual port parity block rams
-//	02/05/08 Add parity errors to header27 and vme adr FA
-//	02/06/08 Replace alct window width oneshot with triad decoder zero delay counter logic
-//	02/07/08 Add pretrig-drift_delay pipleline
-//	04/18/08 Replace sequencer.v and tmb.v with pipeline versions from sequencer_tmb_wrbuf sub-design
-//	04/21/08 Change tp to tprt realtime test points in sequencer.v scope
-//	04/22/08 Add triad test point at raw hits RAM input for internal scope
-//	04/22/08 Decrease drift delay pipe 1bx in sequencer
-//	04/22/08 Tune read_adr_offset in buffer_read/write_ctrl.v for new pre-trigger state machine
-//	04/23/08 Clct blanking mods to pattern_finder.v and sequencer.v
-//	04/24/08 Make clct1 invalid if it has hits below threshold
-//	04/25/08 Add alct_bx0 to mpc frame, allow independent cfeb and rpc tbins, mod header36
-//	04/28/08 Reoragnize counters, block clct-unblanking unless non-standard trigger and L1A modes are enabled
-//	04/29/08 Add new tmb status counter signals, convert counters to 2D arrays
-//	04/30/08 New scope channel assignments, added throttle state to deadtime counter
-//	05/01/08 Rearrange scope channels, push clct_counter into ram 1bx after xtmb, fix hdr11,22,28 write strobes
-//	05/09/08 Move xmpc frame storage to latch after mpc_tx_delay instead of before, makes bx0 delay independent
-//	05/12/08 Fix alct data wr_buf adr in sequencer.v
-//	05/14/08 Updates to global reset in clock_virtex2
-//	05/19/08 Replace mpc rx pipeline, response pipe chained to tx delay pipe, fixes mpc response counter too
-//	05/22/08 Connected global_reset to local power-up resets
-//	05/23/08 Mod global_reset to pulse when DLL re-locks, latch lock loss for sync_err
-//	05/29/08 Updates to alct.v, structure error counters, remove raw hits sync that never worked
-//	05/30/08 Add resync to cfeb.v etc, change default clear_on_resync
-//	06/02/08 Add global_reset_en to clock module
-//	06/03/08 Add mux for active_feb_list to include in scope, add scope mux-mode for alct inputs
-//	06/26/08 Replace alct jtag machine with compact-data version
-//	07/01/08 Mods to alct jtag machine, new signals to vme reg
-//	07/02/08 Mods to alct jtag machine, added prom emulator
-//	07/07/08 Replace jtagsm
-//	07/08/08 Mod status clear in jtagsm, mod chain word arithmetic
-//	07/09/08 Rename hit_thresh_pretrig, pid_thresh_pretrig, hit_thresh_postdrift, add pid_thresh_pretrig_postdrift
-//	07/11/08 Add non-triggering event readout option to tmb.v
-//	07/14/08 Mods to tmb.v
-//	07/15/08 Bugfix non-triggering event logic
-//	07/18/08 Replace corrupted ucf with backup copy
-//	08/01/08 Mod pattern_finder, add purge machine, remove stagger mux, make stagger_csc an output
-//	08/01/08 Gate r_nrpcs_read with rpc_read_enable to zero rpc count in header if rpc readout is off
-//	08/04/08 Add me1a/b pattern finder modules, alas
-//	08/12/08 Add bx0_match to tmb.v
-//	08/12/08 Add pgm delay to alct tx data
-//	08/19/08 Add jsm_sel to select new or old alct user prom state machine and data format
-//	08/20/08 New pattern finder module for me1a/b hs reversal
-//	08/21/08 New reversal mux in pattern finder beco last version was too slow
-//	08/23/08 Add hs reversal option for normal csc
-//	08/25/08 Mod pattern_finder to have non-programmable stagger and reversal, add new multi-compile types
-//	08/27/08 Add ttc PLL lock-loss counter in ccb.v
-//	08/28/08 Remove vme adr FE ccb_stat2, move ccb PLL counters to cnt[56] cnt[57]
-//	08/28/08 Expand trigger source vector to include ME1A and ME1B, replace pattern finder ifdefs
-//	09/05/08 Replace tmb me1a processing to block clcts to mpc
-//	09/11/08 Add tmb trig keep strobes to header
-//	10/22/08 Conform tmb signal names to sequencer output signals
-//	11/14/08 Add sync error counter
-//	11/16/08 Mod fence queue to store l1a data
-//	11/18/08 Mod parity module
-//	01/13/09 Expand alct_seq_cmd to 4 bits, take 1 from alct_reserved_in[4]
-//	01/20/09 Add alct cable loopback test ports
-//	02/24/09 Add ecc to data received from alct, add 2 ecc error counters
-//	03/02/09 Fix sync blanking in alct.v, add ecc to alct trigger data for header, add ecc vme enable
-//	04/29/09 Add miniscope
-//	04/30/09 Add miniscope parity
-//	05/04/09 Add alct1 realtime testpoint for miniscope
-//	05/28/09 Mod clock io list for new alct muonic timing
-//	06/11/09 Change to digital phase shift for alct rxd txd
-//	06/12/09 Change to lac clock for alct rxd txd interstages
-//	06/16/09 Remove digital phase shifter per poobah
-//	06/25/09 Reinstall alct digital phase shifters, add muonic cfeb
-//	06/29/09 Remove digital phase shifters for cfebs, certain cfeb IOBs can not have 2 clock domains
-//	07/10/09 Return digital phase shifters for cfebs, mod ucf to move 5 IOB DDRs to fabric
-//	07/22/09 Remove clock_vme global net to make room for cfeb digital phase shifter gbufs
-//	08/05/09 Remove alct posneg and interstage delay, remove cfeb posnegs
-//	08/07/09 Remove cfeb phase shifter global buffers, revert to 10mhz vme clock
-//	08/11/09 Replace clock_vme with clock in cfeb.v
-//	08/12/09 Replace clock_vme everywhere except vme core logic
-//	08/13/09 Put posneg back in alct receiver
-//	08/14/09 Take alct posneg back out, can not pass timing in par
-//	08/20/09 Put alct posneg back in, passes timing in par with ise 8.2 or with register balancing
-//	09/03/09 Signal name changes to conform to c++ code
-//	09/04/09 Add bx0 mez test points
-//	09/08/09 Add phaser autostart
-//	09/09/09 Remove bx0 mez test points
-//	09/14/09 Add sync err control module
-//	04/27/10 Add bx0 emulator to ccb.v add ttc_resync clears clock_lock_lost
-//	05/10/10 Change vme instantiation to use defparams for firmware version constants
-//	06/26/10 Add miniscope write address offset
-//	06/30/10 Mod injector RAM for alct and l1a bits
+//	03/12/2003	Initial: Ported TMB2003a from tmb2001a+cfebreqst
+//	03/13/2003	New TTC decodes in ccb.v
+//	03/14/2003	Gpio1 pulldown moved to gpio0, cylon waits for phos4
+//	03/15/2003	Sequencer mods for l1reset, scope clock changed, onboard LEDs pup, replace ccb_bx0 with decode
+//	03/16/2003	Sequencer mod for l1a leds, vme fix for seqmod
+//	03/17/2003	Minor mods to VME section, add phos4_busy_done to phos4_lock
+//	03/17/2003	Add dmb_busy to scope
+//	03/19/2003	Fix cfebs_exist, un-reverse crc22, latch la1_tx at xtmb+1 instead of pretrig
+//	03/25/2003	Fix active_feb_flag double pulse, add invp to scope, add start trigger on bx0 to ccb.v
+//	04/04/2003	Sequencer outputs dmb data available after l1a window closes, replaces 1st word flag
+//	04/15/2003	Sequencer mods for dmb_dav and bxn at l1a to fix dav failure on 2nd l1a within 75ns
+//	04/17/2003	Shorten max bxn from 3564 to 924 for CERN beam test
+//	04/22/2003	Mod alct.v to set wr_fifo high when disabled by VME
+//	04/29/2003	LHC_CYCLE changed from parameter to VME programmable, added ttc_bxreset
+//	04/30/2003	Add mpc_accept_tp for scope display
+//	05/05/2003	Fix cfeb_v8 hs ds selection rule
+//	05/06/2003	Use hs_thresh_ff for hs ds selection instead of hs_thresh, add pipeline ff to cfeb_v8.v, alas
+//	05/07/2003	Add new scope signals
+//	05/08/2003	Mods for scope v1h
+//	05/12/2003	New scope channels, add cfebn_hsds tag to pretrigger
+//	05/13/2003	Add scope96
+//	05/16/2003	Add sequencer readout of scope96
+//	05/19/2003	Don't allow scope nrams to be programmable
+//	05/20/2003	Fix ram mux in scope96 for auto mode
+//	05/22/2003	Mod vme.v for usr_jtag to match boot register, swap tdi tdo port directions
+//	05/27/2003	Re-allow scope nrams to be programmable because OSUs DMB fails to read large events
+//	06/04/2003	Add led_flash_rate and overload nl1a to show buffers full
+//	09/11/2003	Moved mpc_accept_tp and mpc_accept_vme from tmb.v to sequencer, removed FF enables
+//	09/12/2003	Add allowpretrignoflush to allow next pretrig without flushing after a nobuffer pretrig 
+//	10/06/2003	Ported from TMB2003a
+//	03/11/2004	Updates from bdtestv3.v, new ddd.v, new clock3.v, new dsn.v, new rpc signals
+//	03/15/2004	Convert all 80MHz inputs to DDR
+//	04/12/2004	Un-inverted tmb_cfg_done beco no pull-ups on TMB
+//	04/13/2004	Re-invert tmb_cfg_done beco GTL drivers have bus hold
+//	04/19/2004	Clear alct ram word count on vme reset
+//	04/19/2004	Revert alct_rx from DDR to 80MHz, had sync err on some bits for unknown reason
+//	04/20/2004	Revert all DDR to 80MHz, 4/19 mod failed in PAR
+//	04/26/2004	Add raw hits readout for RPC data
+//	04/28/2004	Add rpc raw hits delay
+//	05/06/2004	New rpc unit
+//	05/12/2004	More rpc mods
+//	05/20/2004	Add RPC to sequencer, and VME
+//	05/21/2004	Change rpc injector defaults
+//	05/24/2004	Mod sequencer readout machine to skip empty RPCs
+//	05/25/2004	Tuning RPC readout
+//	06/07/2004	Fix tmb.v injector and 1st clct window latching error, change to x_demux_v2, has aset for mpc
+//	06/08/2004	Mod vme.v csc_id logic
+//	06/09/2004	Change RAT delay default to 9, change -1 logic in sequencer to avoid 32-bit underflow
+//	06/10/2004	Add programmable mpc barrel shifter delay
+//	06/17/2004	Add programmable scope trigger channel, vme uses direct _ga for board_id default
+//	07/23/2004	Add nph_pattern to header
+//	07/30/2004	Add crc checking for alct raw hits
+//	08/03/2004	Add event counters
+//	08/04/2004	Fix l1a counter
+//	08/06/2004	Add mpc accept counters
+//	08/09/2004	Add oneshot to alct ext_trig and ext_inject
+//	08/18/2004	Change alct_ccb_ext_trig_en default to 0
+//	08/23/2004	Add alct registers for alct board debug firmware
+//	08/25/2004	separate ccb_clock40_enable from alct_clock_enable
+//	08/26/2004	Add counter stop if any overflows
+//	08/30/2004	Add alct_ext_trig bypass similar to clct for blocked ccb
+//	08/31/2004	Add alct lct error counter for alct debug firmware
+//	09/01/2004	Fix alct err counter
+//	10/01/2004	Add scp_auto to header
+//	10/04/2004	Poobah demands ttc_bx0 sent to mpc instead of bx0_local
+//	10/05/2004	Add alct crc error test point for oscope trigger
+//	11/15/2004	New power-up defaults for RAT2004A
+//	04/21/2005	Mods for tmb2005a prototype, add mez test points
+//	06/09/2005	Mods for TMB2005 new signal assignments:
+//				alct_front_rear	--> alct_rxoe
+//				_alct_oe			--> alct_txoe
+//				rpc_rxalt[0]		-->	rpc_smbrx
+//				rpc_rxalt[1]		--> rpc_dsn  (aliases rpc_free_rx0, alct_rx[30])
+//				alct_rx[29]			--> rpc_done (shares gp_io[4])
+//				boot[13]			--> rpc_hard_reset
+//	06/10/2005	Temporarily flip led_fp for proto board
+//	06/15/2005	Make loopback reg bits alct_txoe and alct_rxoe readonly for lazy software programmers
+//	06/17/2005	Change version ID to E for tmb2005
+//	08/05/2005	Change default alct_status_en and clct_status_en to off for multi-TMB-in-crate
+//	08/05/2005	Fix cnt_tmb_nol1a no connected
+//	08/08/2005	Tri-state ccb if gtl_loop or ccb_status_oe to prevent bus contention, change _ccb_status_ to ccb_status_oe
+//	09/09/2005	Unflip leds for production boards
+//	02/27/2006	Updated date codes, compile with 12mA mpc drive per riceu tests
+//	03/17/2006	Float usr jtag io after hard reset so u76 device-type can be detected
+//	04/24/2006	Add jtag state machine to read alct prom
+//	05/19/2006	Add active_feb_flag blanking for disabled CFEBs per OSU request
+//	05/22/2006	Mod sequencer to block clct pattern triggers from disabled cfebs
+//	05/24/2006	Add alct dav etc to scope
+//	05/25/2006	bug fixes for cfeb_en
+//	07/26/2006	Add vmesm state machine
+//	07/27/2006	Add uptimer and health bits to raw hits header
+//	08/02/2006	Add layer trigger mode
+//	08/07/2006	Mod ddd to wait for vme state machine to finish
+//	08/15/2006	Remove ff from layer_trig signal to speed up by 1 clock
+//	08/28/2006	Add ddd_rat for RAT module, rename ddd to ddd_tmb
+//  08/30/2006	Add clct and alct bxns to vme readout
+//	08/31/2006	Fix missing default writes in vme.v
+//	09/01/2006	Fix rpc_dsn iob in rpc.v and vme.v
+//	09/11/2006	Port from FND 4.2 to ISE 8.2
+//	09/15/2006	XST mods to cfeb,scope
+//	09/18/2006	XST mods to ramlut
+//	09/25/2006	XST mods to tmb.v, x_delay.v, x_delay_os.v
+//	10/02/2006	Mod vmesm to remove autostart ff because its always set by parameter
+//	10/03/2006	Change ramult.v from explict reference to xst inferred rams
+//	10/04/2006	Mods to cfeb.v replace for-loops, use generate statement for triad_decoders
+//	10/04/2006	Power-up mods for xst in vme.v
+//	10/04/2006	Set ffs=0 init value. XST should be doing that, but does not
+//	10/04/2006	Restructure cmd decoder loop in ccb.v
+//	10/05/2006	Replace for-loops with while-loops for xst in clct_fifo.v, rpc.v, and sequencer.v
+//	10/06/2006	Add ise version register
+//	10/09/2006	Convert rpc.v to ddr
+//	10/10/2006	Replace 80mhz mux and demux with 40mhz ddr, change bufg to bufgmux for virtex2
+//	10/11/2006	Cylon now uses srl init
+//	10/11/2006	reg=0 mods to sequencer, vme jen
+//	10/16/2006	Temporarily revert triad persistence to 6-1=5 for software compatibility
+//	10/16/2006	Unrevert, so persitence is now 6=6
+//	10/17/2006	Add first_pat to scope
+//	10/20/2006	Add l1a window position to header22 in sequencer.v
+//	10/20/2006	Fix l1a received counter in sequencer.v
+//	10/23/2006	Mods to l1a window position counter in sequencer.v
+//	10/24/2006	More mods to l1a window position logic
+//	10/25/2006	Yet more mods to l1a window position logic
+//	11/22/2006	Mod scope channels in sequencer.v
+//	11/27/2006	More scope channel mods
+//	11/28/2006	Fix resolver.v cfeb3/cfeb4 boundary logic to delete cfeb4 correctly
+//	12/06/2006	New triad_decoder.v zero deadtime decoder machine, extending hs pulses
+//	01/09/2007	Change synthesis attribute in triad_decoder
+//	02/12/2007	Mod sequencer to set all_cfebs_active only for cfebs enabled for readout
+//	04/06/2007	Reduce RPC arrays from 2 to 4, updated rpc.v with 1bx faster rat demux
+//	04/09/2007	Add mpc_oe to tmb.v and vme.v
+//	04/27/2007	Remove alct+cfeb+mpc rx sync stages, shifts rx clocks by 12.5ns
+//	04/27/2007	Mod ccb.v fmm state machine, ttc_l1reset renamed to ttc_resync, add ignore ttc_start/stop bit
+//	04/30/2007	Revert mpc rx sync stage, because we can't shift mpc rx data by the necessary half cycle for ddr2
+//	05/15/2007	Pattern finder a/b multiplexer select trials
+//	05/16/2007	Forced init on a/b multiplexer select and moved signal from lut to 80mhz ff
+//	05/21/2007	Shorten tmb.v by 2bx, blank mpc quality if no valid lct
+//	05/22/2007	Reduce to just one vme clct separation parameter, add triad skip counter
+//	05/23/2007	Mod pattern 3 ly5 to mirror pattern 2 in pattern_unit
+//	05/25/2007	Fix persist1 signal in cfeb.v
+//	06/13/2007	Change pattern_finder a/b commutation to use new direct clock mirror from dcm
+//	06/14/2007	Replace a/b commutation with logic accissible clock, add serial fanout in pattern finder
+//	06/20/2007	Replace pattern finder with integrated layer-trigger version, shifts pattern IDs +2
+//	06/21/2007	Add bit to block writes to adr 10 to allow parallel downloads to selected alcts
+//	06/22/2007	Increase tmb match timeout in sequencer.v beco clct_width is temporarily 7bx
+//	07/02/2007	Change key layer from ly3 to ly2. Revert tmb timeouts temporarily until checked in simulator
+//	07/02/2007	Mod pattern_unit.v to match prior ly3 result, reduces fpga usage from 93% to 90%
+//	07/03/2007	Mod pid_thresh_pretrig AND logic in pattern_finder
+//	07/05/2007	Fix adjcfeb logic, extend masks to span full cfeb, increase adjcfeb_dist to 6 bits
+//	07/10/2007	Increase tmb match timeout, but make clct_sm wait before re-arming for new event, else get wrong tmb buf
+//	07/16/2007	Update alct.v rams and state machines, add global reset input
+//	07/18/2007	Update tmb.v rams and state machines
+//	07/19/2007	Swap tmb.v mpc injector ram frames
+//	07/20/2007	Revert mpc ram, too many problems with asymmetric ports
+//	07/23/2007	New scope.v and sequencer.v with fewer rams, increase scope from 256tbins to 512
+//	07/25/2007	New rpc.v injector rams, new mpc ram, solved asymmetric ports problem
+//	07/26/2007	Mod rpc.v bxn ram, delay injector_go_rpc 1bx to match cfeb raw hits
+//	07/30/2007	Fix rpc.v bxn ram sump OR
+//	07/31/2007	Increase tmb match timeout again, extend count to 5 bits, to allow for clct_width=15 but not 16 (ie 0)
+//	08/03/2007	Return scope channels to normal assignments, fix alct dangling ram warning
+//	08/10/2007	Replace sequencer.v and tmb.v, new rams, fix tmb_trig_pulse to handle no-match when set to match-only
+//	08/10/2007	Replace scope with 512 tbin version to work with new sequencer.v
+//	08/13/2007	Swap in x-version, add buffer reset counter
+//	08/22/2007	New header/trailer format in sequencer.v
+//	08/23/2007	New crc in alct.v
+//	08/24/2007	Header debugging
+//	08/27/2007	Bugfix in sequencer sump
+//	08/28/2007	More header debugging
+//	08/29/2007	Yet more header debugging
+//	08/30/2007	Header mods, expand year in revcode
+//	08/31/2007	Header mods, increase vme counter width
+//	09/04/2007	Consolidate counter widths
+//	09/06/2007	Delay pretrig and trig counters 1bx in sequencer.v
+//	09/07/2007	Fix header 22,37,38 + alct counter
+//	09/10/2007	Mod trigpath check logic from alct.v, add tmb matching details to header, restructure vme counters
+//	09/11/2007	Increment readout counter 1bx earlier, add temporary debug channels to scope
+//	09/12/2007	Latch tmb dupe signals using mpc data strobe, which is 1bx later than matching info
+//	09/13/2007	Add alct ddr constraints, add no alct counter, mod alct trig path errors, remove tmb dupe ffs
+//	09/14/2007	Injected alct now counts as alct received in alct.v, sequencer.v revert to normal scope signals
+//	09/17/2007	Big raw hits buffer version started
+//	09/18/2007	Convert 5 cfeb instances to 1 gen loop
+//	09/19/2007	Replace rpc.v with big buffer version, increase inj_rwadr width
+//	09/25/2007	Replace clct_fifo with big buffer version
+//	10/01/2007	New clct_fifo with conforming cfeb and rpc sections
+//	10/04/2007	Subtract read address offset from fifo ram read address to compensate for pre-trigger latency
+//	10/09/2007	Conform sequencer crc logic to ddu, skip de0f marker because ddu logic fails to include it
+//	10/11/2007	Conform alct crc logic to ddu's inferior algorithm
+//	10/15/2007	Replace clct_fifo section with cfeb and rpc timing mods
+//	10/16/2007	Remove OR of 2 high order tbin bits in of raw hits stream, just let 4-bit tbin markers wrap at 16
+//	10/29/2007	Replace distributed header rams with block rams
+//	11/02/2007	Replace sequencer.v and tmb.v, mod vme.v to replace timeout counters with phase reply counters
+//	12/12/2007	Add new buffer control logic module, remove old code from clct_fifo module
+//	12/14/2007	New buffer status signals, rename clct_fifo
+//	12/18/2007	Add inhibit for auto buffer reset
+//	12/20/2007	Replace L1A stack
+//	12/21/2007	L1A bug fixes
+//	01/24/2008	Replace buf write/read modules, replace l1a section of sequencer, replace lct quality
+//	01/28/2008	Changed wr_buf_adr_l1a to wr_adr_l1a in sequencer.v
+//	01/31/2008	Remove 2bx FF delay in alct.v, route alcts to seqencer instead of tmb.v
+//	02/01/2008	Add parity to cfeb and rpc raw hits rams for seu detection
+//	02/04/2008	Move parity to separate module
+//	02/05/2008	Replace inferred raw hits rams with instantiated ram, xst fails to build dual port parity block rams
+//	02/05/2008	Add parity errors to header27 and vme adr FA
+//	02/06/2008	Replace alct window width oneshot with triad decoder zero delay counter logic
+//	02/07/2008	Add pretrig-drift_delay pipleline
+//	04/18/2008	Replace sequencer.v and tmb.v with pipeline versions from sequencer_tmb_wrbuf sub-design
+//	04/21/2008	Change tp to tprt realtime test points in sequencer.v scope
+//	04/22/2008	Add triad test point at raw hits RAM input for internal scope
+//	04/22/2008	Decrease drift delay pipe 1bx in sequencer
+//	04/22/2008	Tune read_adr_offset in buffer_read/write_ctrl.v for new pre-trigger state machine
+//	04/23/2008	Clct blanking mods to pattern_finder.v and sequencer.v
+//	04/24/2008	Make clct1 invalid if it has hits below threshold
+//	04/25/2008	Add alct_bx0 to mpc frame, allow independent cfeb and rpc tbins, mod header36
+//	04/28/2008	Reoragnize counters, block clct-unblanking unless non-standard trigger and L1A modes are enabled
+//	04/29/2008	Add new tmb status counter signals, convert counters to 2D arrays
+//	04/30/2008	New scope channel assignments, added throttle state to deadtime counter
+//	05/01/2008	Rearrange scope channels, push clct_counter into ram 1bx after xtmb, fix hdr11,22,28 write strobes
+//	05/09/2008	Move xmpc frame storage to latch after mpc_tx_delay instead of before, makes bx0 delay independent
+//	05/12/2008	Fix alct data wr_buf adr in sequencer.v
+//	05/14/2008	Updates to global reset in clock_virtex2
+//	05/19/2008	Replace mpc rx pipeline, response pipe chained to tx delay pipe, fixes mpc response counter too
+//	05/22/2008	Connected global_reset to local power-up resets
+//	05/23/2008	Mod global_reset to pulse when DLL re-locks, latch lock loss for sync_err
+//	05/29/2008	Updates to alct.v, structure error counters, remove raw hits sync that never worked
+//	05/30/2008	Add resync to cfeb.v etc, change default clear_on_resync
+//	06/02/2008	Add global_reset_en to clock module
+//	06/03/2008	Add mux for active_feb_list to include in scope, add scope mux-mode for alct inputs
+//	06/26/2008	Replace alct jtag machine with compact-data version
+//	07/01/2008	Mods to alct jtag machine, new signals to vme reg
+//	07/02/2008	Mods to alct jtag machine, added prom emulator
+//	07/07/2008	Replace jtagsm
+//	07/08/2008	Mod status clear in jtagsm, mod chain word arithmetic
+//	07/09/2008	Rename hit_thresh_pretrig, pid_thresh_pretrig, hit_thresh_postdrift, add pid_thresh_pretrig_postdrift
+//	07/11/2008	Add non-triggering event readout option to tmb.v
+//	07/14/2008	Mods to tmb.v
+//	07/15/2008	Bugfix non-triggering event logic
+//	07/18/2008	Replace corrupted ucf with backup copy
+//	08/01/2008	Mod pattern_finder, add purge machine, remove stagger mux, make stagger_csc an output
+//	08/01/2008	Gate r_nrpcs_read with rpc_read_enable to zero rpc count in header if rpc readout is off
+//	08/04/2008	Add me1a/b pattern finder modules, alas
+//	08/12/2008	Add bx0_match to tmb.v
+//	08/12/2008	Add pgm delay to alct tx data
+//	08/19/2008	Add jsm_sel to select new or old alct user prom state machine and data format
+//	08/20/2008	New pattern finder module for me1a/b hs reversal
+//	08/21/2008	New reversal mux in pattern finder beco last version was too slow
+//	08/23/2008	Add hs reversal option for normal csc
+//	08/25/2008	Mod pattern_finder to have non-programmable stagger and reversal, add new multi-compile types
+//	08/27/2008	Add ttc PLL lock-loss counter in ccb.v
+//	08/28/2008	Remove vme adr FE ccb_stat2, move ccb PLL counters to cnt[56] cnt[57]
+//	08/28/2008	Expand trigger source vector to include ME1A and ME1B, replace pattern finder ifdefs
+//	09/05/2008	Replace tmb me1a processing to block clcts to mpc
+//	09/11/2008	Add tmb trig keep strobes to header
+//	10/22/2008	Conform tmb signal names to sequencer output signals
+//	11/14/2008	Add sync error counter
+//	11/16/2008	Mod fence queue to store l1a data
+//	11/18/2008	Mod parity module
+//	01/13/2009	Expand alct_seq_cmd to 4 bits, take 1 from alct_reserved_in[4]
+//	01/20/2009	Add alct cable loopback test ports
+//	02/24/2009	Add ecc to data received from alct, add 2 ecc error counters
+//	03/02/2009	Fix sync blanking in alct.v, add ecc to alct trigger data for header, add ecc vme enable
+//	04/29/2009	Add miniscope
+//	04/30/2009	Add miniscope parity
+//	05/04/2009	Add alct1 realtime testpoint for miniscope
+//	05/28/2009	Mod clock io list for new alct muonic timing
+//	06/11/2009	Change to digital phase shift for alct rxd txd
+//	06/12/2009	Change to lac clock for alct rxd txd interstages
+//	06/16/2009	Remove digital phase shifter per poobah
+//	06/25/2009	Reinstall alct digital phase shifters, add muonic cfeb
+//	06/29/2009	Remove digital phase shifters for cfebs, certain cfeb IOBs can not have 2 clock domains
+//	07/10/2009	Return digital phase shifters for cfebs, mod ucf to move 5 IOB DDRs to fabric
+//	07/22/2009	Remove clock_vme global net to make room for cfeb digital phase shifter gbufs
+//	08/05/2009	Remove alct posneg and interstage delay, remove cfeb posnegs
+//	08/07/2009	Remove cfeb phase shifter global buffers, revert to 10mhz vme clock
+//	08/11/2009	Replace clock_vme with clock in cfeb.v
+//	08/12/2009	Replace clock_vme everywhere except vme core logic
+//	08/13/2009	Put posneg back in alct receiver
+//	08/14/2009	Take alct posneg back out, can not pass timing in par
+//	08/20/2009	Put alct posneg back in, passes timing in par with ise 8.2 or with register balancing
+//	09/03/2009	Signal name changes to conform to c++ code
+//	09/04/2009	Add bx0 mez test points
+//	09/08/2009	Add phaser autostart
+//	09/09/2009	Remove bx0 mez test points
+//	09/14/2009	Add sync err control module
+//	04/27/2010	Add bx0 emulator to ccb.v add ttc_resync clears clock_lock_lost
+//	05/10/2010	Change vme instantiation to use defparams for firmware version constants
+//	06/26/2010	Add miniscope write address offset
+//	06/30/2010	Mod injector RAM for alct and l1a bits
+//	11/30/2010	Add virtex6 unified module names
+//	05/31/2011	Mod vme to tri-state during write cycles
+//	08/16/2012	Add ALCT Spartan-6 startup wait status to meztp
+//	08/17/2012	Increase Spartan-6 startup delay 1ms for comfort
+//
 //-------------------------------------------------------------------------------------------------------------------
 //	Port Declarations
 //-------------------------------------------------------------------------------------------------------------------
@@ -601,7 +606,7 @@
 // Display definitions in synth log
 //-------------------------------------------------------------------------------------------------------------------
 // Load global defines
-	`include "tmb2005e_firmware_version.v"
+	`include "firmware_version.v"
 
 // Display
 	`ifdef FIRMWARE_TYPE		initial	$display ("FIRMWARE_TYPE %H", `FIRMWARE_TYPE);	`endif
@@ -611,11 +616,17 @@
 	`ifdef FPGAID 				initial	$display ("FPGAID        %H", `FPGAID       );	`endif
 	`ifdef ISE_VERSION			initial	$display ("ISE_VERSION   %H", `ISE_VERSION  );	`endif
 	`ifdef MEZCARD				initial	$display ("MEZCARD       %H", `MEZCARD      );	`endif
+
 	`ifdef AUTO_VME 			initial	$display ("AUTO_VME      %H", `AUTO_VME     );	`endif
 	`ifdef AUTO_JTAG			initial	$display ("AUTO_JTAG     %H", `AUTO_JTAG    );	`endif
 	`ifdef AUTO_PHASER			initial	$display ("AUTO_PHASER   %H", `AUTO_PHASER  );	`endif
+
 	`ifdef ALCT_MUONIC			initial	$display ("ALCT_MUONIC   %H", `ALCT_MUONIC  );	`endif
 	`ifdef CFEB_MUONIC			initial	$display ("CFEB_MUONIC   %H", `CFEB_MUONIC  );	`endif
+
+	`ifdef VIRTEX2				initial $display ("VIRTEX2       %H", `VIRTEX2      );	`endif
+	`ifdef VIRTEX6				initial $display ("VIRTEX6       %H", `VIRTEX6      );	`endif
+
 	`ifdef CSC_TYPE_A			initial	$display ("CSC_TYPE_A    %H", `CSC_TYPE_A   );	`endif			
 	`ifdef CSC_TYPE_B			initial	$display ("CSC_TYPE_B    %H", `CSC_TYPE_B   );	`endif			
 	`ifdef CSC_TYPE_C			initial	$display ("CSC_TYPE_C    %H", `CSC_TYPE_C   );	`endif			
@@ -624,27 +635,31 @@
 //-------------------------------------------------------------------------------------------------------------------
 // Clock DCM Instantiation
 //-------------------------------------------------------------------------------------------------------------------
-	wire [5:0] phase_alct_rxd;
-	wire [5:0] phase_alct_txd;
-	wire [5:0] phase_cfeb0_rxd;
-	wire [5:0] phase_cfeb1_rxd;
-	wire [5:0] phase_cfeb2_rxd;
-	wire [5:0] phase_cfeb3_rxd;
-	wire [5:0] phase_cfeb4_rxd;
+// Phaser VME control/status ports
+	wire [6:0]	dps_fire;
+	wire [6:0]	dps_reset;
+	wire [6:0]	dps_busy;
+	wire [6:0]	dps_lock;
 
-	wire [2:0] phaser_sm_alct_rxd;
-	wire [2:0] phaser_sm_alct_txd;
-	wire [2:0] phaser_sm_cfeb0_rxd;
-	wire [2:0] phaser_sm_cfeb1_rxd;
-	wire [2:0] phaser_sm_cfeb2_rxd;
-	wire [2:0] phaser_sm_cfeb3_rxd;
-	wire [2:0] phaser_sm_cfeb4_rxd;
+	wire [7:0]	dps0_phase;
+	wire [7:0]	dps1_phase;
+	wire [7:0]	dps2_phase;
+	wire [7:0]	dps3_phase;
+	wire [7:0]	dps4_phase;
+	wire [7:0]	dps5_phase;
+	wire [7:0]	dps6_phase;
+
+	wire [2:0]	dps0_sm_vec;
+	wire [2:0]	dps1_sm_vec;
+	wire [2:0]	dps2_sm_vec;
+	wire [2:0]	dps3_sm_vec;
+	wire [2:0]	dps4_sm_vec;
+	wire [2:0]	dps5_sm_vec;
+	wire[2:0]	dps6_sm_vec;
 
 	wire [MXCFEB-1:0] clock_cfeb_rxd;
 
-	//xsynthesis attribute PERIOD of clock is "20ns";
-
-	clock_virtex2 uclock_virtex2
+	clock_ctrl uclock_ctrl
 	(
 // Clock inputs
 	.tmb_clock0				(tmb_clock0),				// In	40MHz clock bypasses 3D3444 and loads Mez PROMs, chip bottom
@@ -662,7 +677,7 @@
 	.clock_vme				(clock_vme),				// Out	10MHz global VME clock
 	.clock_lac				(clock_lac),				// Out	40MHz pattern finder multiplexer a/b select
 
-/// Phase delayed clocks
+// Phase delayed clocks
 	.clock_alct_txd			(clock_alct_txd),			// Out	40MHz ALCT transmit data clock 1x
 	.clock_alct_rxd			(clock_alct_rxd),			// Out	40MHz ALCT receive  data clock 1x
 	.clock_cfeb0_rxd		(clock_cfeb_rxd[0]),		// Out	40MHz CFEB receive  data clock 1x
@@ -685,76 +700,29 @@
 	.lock_rpc_rxalt1		(lock_rpc_rxalt1),			// Out	DCM lock status
 	.lock_tmb_clock1		(lock_tmb_clock1),			// Out	DCM lock status
 	.lock_alct_rxclock		(lock_alct_rxclock),		// Out	DCM lock status
+	.clock_ctrl_sump		(clock_ctrl_sump),			// Out	Unused signals
 
-// ALCT_rxd Phaser VME control/status ports
-	.fire_alct_rxd			(fire_alct_rxd),			// In	Set new phase
-	.reset_alct_rxd			(reset_alct_rxd),			// In	VME Reset current phase
-	.hcycle_alct_rxd		(hcycle_alct_rxd),			// In	Half    cycle phase shift
-	.qcycle_alct_rxd		(qcycle_alct_rxd),			// In	Quarter cycle phase shift
-	.phase_alct_rxd			(phase_alct_rxd[5:0]),		// In	Phase to set, 0-255
-	.phaser_busy_alct_rxd	(phaser_busy_alct_rxd),		// Out	Phase shifter busy
-	.phaser_sm_alct_rxd		(phaser_sm_alct_rxd[2:0]),	// Out	Phase shifter machine state
-	.lock_alct_rxd			(lock_alct_rxd),			// Out	DCM lock status
+// Phaser VME control/status ports
+	.dps_fire				(dps_fire[6:0]),			// In	Set new phase
+	.dps_reset				(dps_reset[6:0]),			// In	VME Reset current phase
+	.dps_busy				(dps_busy[6:0]),			// Out	Phase shifter busy
+	.dps_lock				(dps_lock[6:0]),			// Out	PLL lock status
 
-// ALCT_txd Phaser VME control/status ports
-	.fire_alct_txd			(fire_alct_txd),			// In	Set new phase
-	.reset_alct_txd			(reset_alct_txd),			// In	VME Reset current phase
-	.hcycle_alct_txd		(hcycle_alct_txd),			// In	Half    cycle phase shift
-	.qcycle_alct_txd		(qcycle_alct_txd),			// In	Quarter cycle phase shift
-	.phase_alct_txd			(phase_alct_txd[5:0]),		// In	Phase to set, 0-255
-	.phaser_busy_alct_txd	(phaser_busy_alct_txd),		// Out	Phase shifter busy
-	.phaser_sm_alct_txd		(phaser_sm_alct_txd[2:0]),	// Out	Phase shifter machine state
-	.lock_alct_txd			(lock_alct_txd),			// Out	DCM lock status
-	
-// CFEB0_rxd Phaser VME control/status ports
-	.fire_cfeb0_rxd			(fire_cfeb0_rxd),			// In	Set new phase
-	.reset_cfeb0_rxd		(reset_cfeb0_rxd),			// In	VME Reset current phase
-	.hcycle_cfeb0_rxd		(hcycle_cfeb0_rxd),			// In	Half    cycle phase shift
-	.qcycle_cfeb0_rxd		(qcycle_cfeb0_rxd),			// In	Quarter cycle phase shift
-	.phase_cfeb0_rxd		(phase_cfeb0_rxd[5:0]),		// In	Phase to set, 0-255
-	.phaser_busy_cfeb0_rxd	(phaser_busy_cfeb0_rxd),	// Out	Phase shifter busy
-	.phaser_sm_cfeb0_rxd	(phaser_sm_cfeb0_rxd[2:0]),	// Out	Phase shifter machine state
-	.lock_cfeb0_rxd			(lock_cfeb0_rxd),			// Out	DCM lock status
+	.dps0_phase				(dps0_phase[7:0]),			// In	Phase to set, 0-255
+	.dps1_phase				(dps1_phase[7:0]),			// In	Phase to set, 0-255
+	.dps2_phase				(dps2_phase[7:0]),			// In	Phase to set, 0-255
+	.dps3_phase				(dps3_phase[7:0]),			// In	Phase to set, 0-255
+	.dps4_phase				(dps4_phase[7:0]),			// In	Phase to set, 0-255
+	.dps5_phase				(dps5_phase[7:0]),			// In	Phase to set, 0-255
+	.dps6_phase				(dps6_phase[7:0]),			// In	Phase to set, 0-255
 
-// CFEB1_rxd Phaser VME control/status ports
-	.fire_cfeb1_rxd			(fire_cfeb1_rxd),			// In	Set new phase
-	.reset_cfeb1_rxd		(reset_cfeb1_rxd),			// In	VME Reset current phase
-	.hcycle_cfeb1_rxd		(hcycle_cfeb1_rxd),			// In	Half    cycle phase shift
-	.qcycle_cfeb1_rxd		(qcycle_cfeb1_rxd),			// In	Quarter cycle phase shift
-	.phase_cfeb1_rxd		(phase_cfeb1_rxd[5:0]),		// In	Phase to set, 0-255
-	.phaser_busy_cfeb1_rxd	(phaser_busy_cfeb1_rxd),	// Out	Phase shifter busy
-	.phaser_sm_cfeb1_rxd	(phaser_sm_cfeb1_rxd[2:0]),	// Out	Phase shifter machine state
-	.lock_cfeb1_rxd			(lock_cfeb1_rxd),			// Out	DCM lock status
-
-// CFEB2_rxd Phaser VME control/status ports
-	.fire_cfeb2_rxd			(fire_cfeb2_rxd),			// In	Set new phase
-	.reset_cfeb2_rxd		(reset_cfeb2_rxd),			// In	VME Reset current phase
-	.hcycle_cfeb2_rxd		(hcycle_cfeb2_rxd),			// In	Half    cycle phase shift
-	.qcycle_cfeb2_rxd		(qcycle_cfeb2_rxd),			// In	Quarter cycle phase shift
-	.phase_cfeb2_rxd		(phase_cfeb2_rxd[5:0]),		// In	Phase to set, 0-255
-	.phaser_busy_cfeb2_rxd	(phaser_busy_cfeb2_rxd),	// Out	Phase shifter busy
-	.phaser_sm_cfeb2_rxd	(phaser_sm_cfeb2_rxd[2:0]),	// Out	Phase shifter machine state
-	.lock_cfeb2_rxd			(lock_cfeb2_rxd),			// Out	DCM lock status
-
-// CFEB3_rxd Phaser VME control/status ports
-	.fire_cfeb3_rxd			(fire_cfeb3_rxd),			// In	Set new phase
-	.reset_cfeb3_rxd		(reset_cfeb3_rxd),			// In	VME Reset current phase
-	.hcycle_cfeb3_rxd		(hcycle_cfeb3_rxd),			// In	Half    cycle phase shift
-	.qcycle_cfeb3_rxd		(qcycle_cfeb3_rxd),			// In	Quarter cycle phase shift
-	.phase_cfeb3_rxd		(phase_cfeb3_rxd[5:0]),		// In	Phase to set, 0-255
-	.phaser_busy_cfeb3_rxd	(phaser_busy_cfeb3_rxd),	// Out	Phase shifter busy
-	.phaser_sm_cfeb3_rxd	(phaser_sm_cfeb3_rxd[2:0]),	// Out	Phase shifter machine state
-	.lock_cfeb3_rxd			(lock_cfeb3_rxd),			// Out	DCM lock status
-
-// CFEB4_rxd Phaser VME control/status ports
-	.fire_cfeb4_rxd			(fire_cfeb4_rxd),			// In	Set new phase
-	.reset_cfeb4_rxd		(reset_cfeb4_rxd),			// In	VME Reset current phase
-	.hcycle_cfeb4_rxd		(hcycle_cfeb4_rxd),			// In	Half    cycle phase shift
-	.qcycle_cfeb4_rxd		(qcycle_cfeb4_rxd),			// In	Quarter cycle phase shift
-	.phase_cfeb4_rxd		(phase_cfeb4_rxd[5:0]),		// In	Phase to set, 0-255
-	.phaser_busy_cfeb4_rxd	(phaser_busy_cfeb4_rxd),	// Out	Phase shifter busy
-	.phaser_sm_cfeb4_rxd	(phaser_sm_cfeb4_rxd[2:0]),	// Out	Phase shifter machine state
-	.lock_cfeb4_rxd			(lock_cfeb4_rxd)			// Out	DCM lock status
+	.dps0_sm_vec			(dps0_sm_vec[2:0]),			// Out	Phase shifter machine state
+	.dps1_sm_vec			(dps1_sm_vec[2:0]),			// Out	Phase shifter machine state
+	.dps2_sm_vec			(dps2_sm_vec[2:0]),			// Out	Phase shifter machine state
+	.dps3_sm_vec			(dps3_sm_vec[2:0]),			// Out	Phase shifter machine state
+	.dps4_sm_vec			(dps4_sm_vec[2:0]),			// Out	Phase shifter machine state
+	.dps5_sm_vec			(dps5_sm_vec[2:0]),			// Out	Phase shifter machine state
+	.dps6_sm_vec			(dps6_sm_vec[2:0])			// Out	Phase shifter machine state
 	);
 
 //------------------------------------------------------------------------------------------------------------------
@@ -1845,6 +1813,7 @@
 	.l1a_window				(l1a_window[MXL1WIND-1:0]),			// In	Level1 Accept window width after delay
 	.l1a_win_pri_en			(l1a_win_pri_en),					// In	Enable L1A window priority
 	.l1a_lookback			(l1a_lookback[MXBADR-1:0]),			// In	Bxn to look back from l1a wr_buf_adr
+	.l1a_preset_sr			(l1a_preset_sr),					// In	Dummy VME bit to feign preset l1a sr group
 
 	.l1a_allow_match		(l1a_allow_match),					// In	Readout allows tmb trig pulse in L1A window (normal mode)
 	.l1a_allow_notmb		(l1a_allow_notmb),					// In	Readout allows no tmb trig pulse in L1A window
@@ -2710,16 +2679,16 @@
 
 	always @* begin
 	if (float_gpio) begin
-	gp_io_[0]	= 1'bz;
-	gp_io_[1]	= 1'bz;
-	gp_io_[2]	= 1'bz;
-	gp_io_[3]	= 1'bz;
+	gp_io_[0]	<= 1'bz;
+	gp_io_[1]	<= 1'bz;
+	gp_io_[2]	<= 1'bz;
+	gp_io_[3]	<= 1'bz;
 	end
 	else begin
-	gp_io_[0]	= rat_sn_out;				// Out	RAT dsn for debug		jtag_fgpa0 tdo (out) shunted to gp_io1, usually
-	gp_io_[1]	= alct_crc_err_tp;			// Out	CRC Error test point	jtag_fpga1 tdi (in) 
-	gp_io_[2]	= alct_vpf_tp;				// Out	Timing test point		jtag_fpga2 tms (in)
-	gp_io_[3]	= clct_window_tp;			// Out	Timing test point		jtag_fpga3 tck (in)
+	gp_io_[0]	<= rat_sn_out;				// Out	RAT dsn for debug		jtag_fgpa0 tdo (out) shunted to gp_io1, usually
+	gp_io_[1]	<= alct_crc_err_tp;			// Out	CRC Error test point	jtag_fpga1 tdi (in) 
+	gp_io_[2]	<= alct_vpf_tp;				// Out	Timing test point		jtag_fpga2 tms (in)
+	gp_io_[3]	<= clct_window_tp;			// Out	Timing test point		jtag_fpga3 tck (in)
 	end
 	end
 
@@ -2737,16 +2706,22 @@
 //-------------------------------------------------------------------------------------------------------------------
 // Mezzanine Test Points
 //-------------------------------------------------------------------------------------------------------------------
-	wire sump;	// unused signals defined at end of module
+	wire sump;					// Unused signals defined at end of module
+	wire alct_startup_msec;		// Msec pulse
+	wire alct_wait_dll;			// Waiting for TMB DLL lock
+	wire alct_wait_vme;			// Waiting for TMB VME load from user PROM
+	wire alct_wait_cfg;			// Waiting for ALCT FPGA to configure from mez PROM
+	wire alct_startup_done;		// ALCT FPGA should be configured by now
 
-	assign meztp20 = (lock_tmb_clock0) ? 1'bz : sump;	// discard unused signals
-	assign meztp21 = (lock_tmb_clock0) ? 1'bz : 1'b1;
-	assign meztp22 = (lock_tmb_clock0) ? 1'bz : 1'b1;
-	assign meztp23 = (lock_tmb_clock0) ? 1'bz : 1'b1;
-	assign meztp24 = (lock_tmb_clock0) ? 1'bz : 1'b1;
-	assign meztp25 = (lock_tmb_clock0) ? 1'bz : 1'b1;
-	assign meztp26 = (lock_tmb_clock0) ? 1'bz : 1'b1;
-	assign meztp27 = (lock_tmb_clock0) ? 1'bz : 1'b1;
+
+	assign meztp20 = alct_startup_msec;	
+	assign meztp21 = alct_wait_dll;
+	assign meztp22 = alct_startup_done;
+	assign meztp23 = alct_wait_vme;
+	assign meztp24 = alct_wait_cfg;
+	assign meztp25 = lock_tmb_clock0;
+	assign meztp26 = 0;
+	assign meztp27 = sump;
 
 //-------------------------------------------------------------------------------------------------------------------
 //	Sync Error Control Instantiation
@@ -2951,6 +2926,11 @@
 	.alct_cfg_done			(alct_cfg_done),				// In	ALCT FPGA reports ready
 	.mez_done				(mez_done),						// In	Mezzanine FPGA done loading
 	.mez_busy				(mez_busy),						// Out	FPGA busy (asserted during config), user I/O after config
+	.alct_startup_msec		(alct_startup_msec),			// Out	Msec pulse
+	.alct_wait_dll			(alct_wait_dll),				// Out	Waiting for TMB DLL lock
+	.alct_wait_vme			(alct_wait_vme),				// Out	Waiting for TMB VME load from user PROM
+	.alct_wait_cfg			(alct_wait_cfg),				// Out	Waiting for ALCT FPGA to configure from mez PROM
+	.alct_startup_done		(alct_startup_done),			// Out	ALCT FPGA should be configured by now
 
 // CCB Ports: Status/Configuration
 	.ccb_cmd				(ccb_cmd[7:0]),					// In	CCB command word
@@ -3225,6 +3205,7 @@
 	.l1a_window				(l1a_window[MXL1WIND-1:0]),			// Out	Level1 Accept window width after delay
 	.l1a_win_pri_en			(l1a_win_pri_en),					// Out	Enable L1A window priority
 	.l1a_lookback			(l1a_lookback[MXBADR-1:0]),			// Out	Bxn to look back from l1a wr_buf_adr
+	.l1a_preset_sr			(l1a_preset_sr),					// Out	Dummy VME bit to feign preset l1a sr group
 
 	.l1a_allow_match		(l1a_allow_match),					// Out	Readout allows tmb trig pulse in L1A window (normal mode)
 	.l1a_allow_notmb		(l1a_allow_notmb),					// Out	Readout allows no tmb trig pulse in L1A window
@@ -3536,75 +3517,27 @@
 	.cfeb3_rxd_posneg		(cfeb3_rxd_posneg),					// Out	CFEB cfeb-to-tmb inter-stage clock select 0 or 180 degrees
 	.cfeb4_rxd_posneg		(cfeb4_rxd_posneg),					// Out	CFEB cfeb-to-tmb inter-stage clock select 0 or 180 degrees
 	
-// ALCT_rxd Phaser VME control/status ports
-	.fire_alct_rxd			(fire_alct_rxd),					// Out	Set new phase
-	.reset_alct_rxd			(reset_alct_rxd),					// Out	VME Reset current phase
-	.hcycle_alct_rxd		(hcycle_alct_rxd),					// Out	Half    cycle phase shift
-	.qcycle_alct_rxd		(qcycle_alct_rxd),					// Out	Quarter cycle phase shift
-	.phase_alct_rxd			(phase_alct_rxd[5:0]),				// Out	Phase to set, 0-255
-	.phaser_busy_alct_rxd	(phaser_busy_alct_rxd),				// In	Phase shifter busy
-	.phaser_sm_alct_rxd		(phaser_sm_alct_rxd[2:0]),			// In	Phase shifter machine state
-	.lock_alct_rxd			(lock_alct_rxd),					// In	DCM lock status
+// Phaser VME control/status ports
+	.dps_fire				(dps_fire[6:0]),					// Out	Set new phase
+	.dps_reset				(dps_reset[6:0]),					// Out	VME Reset current phase
+	.dps_busy				(dps_busy[6:0]),					// In	Phase shifter busy
+	.dps_lock				(dps_lock[6:0]),					// In	PLL lock status
 
-// ALCT_txd Phaser VME control/status ports
-	.fire_alct_txd			(fire_alct_txd),					// Out	Set new phase
-	.reset_alct_txd			(reset_alct_txd),					// Out	VME Reset current phase
-	.hcycle_alct_txd		(hcycle_alct_txd),					// Out	Half    cycle phase shift
-	.qcycle_alct_txd		(qcycle_alct_txd),					// Out	Quarter cycle phase shift
-	.phase_alct_txd			(phase_alct_txd[5:0]),				// Out	Phase to set, 0-255
-	.phaser_busy_alct_txd	(phaser_busy_alct_txd),				// In	Phase shifter busy
-	.phaser_sm_alct_txd		(phaser_sm_alct_txd[2:0]),			// In	Phase shifter machine state
-	.lock_alct_txd			(lock_alct_txd),					// In	DCM lock status
+	.dps0_phase				(dps0_phase[7:0]),					// Out	Phase to set, 0-255
+	.dps1_phase				(dps1_phase[7:0]),					// Out	Phase to set, 0-255
+	.dps2_phase				(dps2_phase[7:0]),					// Out	Phase to set, 0-255
+	.dps3_phase				(dps3_phase[7:0]),					// Out	Phase to set, 0-255
+	.dps4_phase				(dps4_phase[7:0]),					// Out	Phase to set, 0-255
+	.dps5_phase				(dps5_phase[7:0]),					// Out	Phase to set, 0-255
+	.dps6_phase				(dps6_phase[7:0]),					// Out	Phase to set, 0-255
 
-// CFEB0_rxd Phaser VME control/status ports
-	.fire_cfeb0_rxd			(fire_cfeb0_rxd),					// Out	Set new phase
-	.reset_cfeb0_rxd		(reset_cfeb0_rxd),					// Out	VME Reset current phase
-	.hcycle_cfeb0_rxd		(hcycle_cfeb0_rxd),					// Out	Half    cycle phase shift
-	.qcycle_cfeb0_rxd		(qcycle_cfeb0_rxd),					// Out	Quarter cycle phase shift
-	.phase_cfeb0_rxd		(phase_cfeb0_rxd[5:0]),				// Out	Phase to set, 0-255
-	.phaser_busy_cfeb0_rxd	(phaser_busy_cfeb0_rxd),			// In	Phase shifter busy
-	.phaser_sm_cfeb0_rxd	(phaser_sm_cfeb0_rxd[2:0]),			// In	Phase shifter machine state
-	.lock_cfeb0_rxd			(lock_cfeb0_rxd),					// In	DCM lock status
-
-// CFEB1_rxd Phaser VME control/status ports
-	.fire_cfeb1_rxd			(fire_cfeb1_rxd),					// Out	Set new phase
-	.reset_cfeb1_rxd		(reset_cfeb1_rxd),					// Out	VME Reset current phase
-	.hcycle_cfeb1_rxd		(hcycle_cfeb1_rxd),					// Out	Half    cycle phase shift
-	.qcycle_cfeb1_rxd		(qcycle_cfeb1_rxd),					// Out	Quarter cycle phase shift
-	.phase_cfeb1_rxd		(phase_cfeb1_rxd[5:0]),				// Out	Phase to set, 0-255
-	.phaser_busy_cfeb1_rxd	(phaser_busy_cfeb1_rxd),			// In	Phase shifter busy
-	.phaser_sm_cfeb1_rxd	(phaser_sm_cfeb1_rxd[2:0]),			// In	Phase shifter machine state
-	.lock_cfeb1_rxd			(lock_cfeb1_rxd),					// In	DCM lock status
-
-// CFEB2_rxd Phaser VME control/status ports
-	.fire_cfeb2_rxd			(fire_cfeb2_rxd),					// Out	Set new phase
-	.reset_cfeb2_rxd		(reset_cfeb2_rxd),					// Out	VME Reset current phase
-	.hcycle_cfeb2_rxd		(hcycle_cfeb2_rxd),					// Out	Half    cycle phase shift
-	.qcycle_cfeb2_rxd		(qcycle_cfeb2_rxd),					// Out	Quarter cycle phase shift
-	.phase_cfeb2_rxd		(phase_cfeb2_rxd[5:0]),				// Out	Phase to set, 0-255
-	.phaser_busy_cfeb2_rxd	(phaser_busy_cfeb2_rxd),			// In	Phase shifter busy
-	.phaser_sm_cfeb2_rxd	(phaser_sm_cfeb2_rxd[2:0]),			// In	Phase shifter machine state
-	.lock_cfeb2_rxd			(lock_cfeb2_rxd),					// In	DCM lock status
-
-// CFEB3_rxd Phaser VME control/status ports
-	.fire_cfeb3_rxd			(fire_cfeb3_rxd),					// Out	Set new phase
-	.reset_cfeb3_rxd		(reset_cfeb3_rxd),					// Out	VME Reset current phase
-	.hcycle_cfeb3_rxd		(hcycle_cfeb3_rxd),					// Out	Half    cycle phase shift
-	.qcycle_cfeb3_rxd		(qcycle_cfeb3_rxd),					// Out	Quarter cycle phase shift
-	.phase_cfeb3_rxd		(phase_cfeb3_rxd[5:0]),				// Out	Phase to set, 0-255
-	.phaser_busy_cfeb3_rxd	(phaser_busy_cfeb3_rxd),			// In	Phase shifter busy
-	.phaser_sm_cfeb3_rxd	(phaser_sm_cfeb3_rxd[2:0]),			// In	Phase shifter machine state
-	.lock_cfeb3_rxd			(lock_cfeb3_rxd),					// In	DCM lock status
-
-// CFEB4_rxd Phaser VME control/status ports
-	.fire_cfeb4_rxd			(fire_cfeb4_rxd),					// Out	Set new phase
-	.reset_cfeb4_rxd		(reset_cfeb4_rxd),					// Out	VME Reset current phase
-	.hcycle_cfeb4_rxd		(hcycle_cfeb4_rxd),					// Out	Half    cycle phase shift
-	.qcycle_cfeb4_rxd		(qcycle_cfeb4_rxd),					// Out	Quarter cycle phase shift
-	.phase_cfeb4_rxd		(phase_cfeb4_rxd[5:0]),				// Out	Phase to set, 0-255
-	.phaser_busy_cfeb4_rxd	(phaser_busy_cfeb4_rxd),			// In	Phase shifter busy
-	.phaser_sm_cfeb4_rxd	(phaser_sm_cfeb4_rxd[2:0]),			// In	Phase shifter machine state
-	.lock_cfeb4_rxd			(lock_cfeb4_rxd),					// In	DCM lock status
+	.dps0_sm_vec			(dps0_sm_vec[2:0]),					// In	Phase shifter machine state
+	.dps1_sm_vec			(dps1_sm_vec[2:0]),					// In	Phase shifter machine state
+	.dps2_sm_vec			(dps2_sm_vec[2:0]),					// In	Phase shifter machine state
+	.dps3_sm_vec			(dps3_sm_vec[2:0]),					// In	Phase shifter machine state
+	.dps4_sm_vec			(dps4_sm_vec[2:0]),					// In	Phase shifter machine state
+	.dps5_sm_vec			(dps5_sm_vec[2:0]),					// In	Phase shifter machine state
+	.dps6_sm_vec			(dps6_sm_vec[2:0]),					// In	Phase shifter machine state
 
 // Interstage delays
 	.cfeb0_rxd_int_delay	(cfeb_rxd_int_delay[0][3:0]),		// Out	Interstage delay
@@ -3641,8 +3574,8 @@
 //-------------------------------------------------------------------------------------------------------------------
 // Unused Signal Sump
 //-------------------------------------------------------------------------------------------------------------------
-	assign sump = ccb_sump | alct_sump  |rpc_sump | sequencer_sump | tmb_sump | buf_sump	|
-	vme_sump | rpc_inj_sel | mini_sump | (|cfeb_sump) | inj_ram_sump;
+	assign sump = ccb_sump | alct_sump |   rpc_sump   | sequencer_sump | tmb_sump | buf_sump	|
+	vme_sump | rpc_inj_sel | mini_sump | (|cfeb_sump) | inj_ram_sump   | clock_ctrl_sump;
 
 //-------------------------------------------------------------------------------------------------------------------
 	endmodule

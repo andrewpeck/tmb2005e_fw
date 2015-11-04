@@ -60,12 +60,15 @@
 //	10/02/06 Remove autostart ff because its always set by parameter
 //	01/12/09 Update for ISE 10.1i
 //	07/31/09 Add reg inits, ds0 was powering up as 1 with ise 10.1i, but was 0 with ise 8.2i
+//	08/19/10 Port to ise 12, change to non-blocking operators
+//	08/20/10 Add short prom ce init count for debug mode
+//	08/24/10 Rename gbl_reset, replace async reset with power up init
 //-----------------------------------------------------------------------------------------------------------------
 	module vmesm
 	(
 // Control
 	clock,
-	gbl_reset,
+	global_reset,
 	power_up,
 	vme_ready,
 	start,
@@ -148,7 +151,7 @@
 //-----------------------------------------------------------------------------------------------------------------
 // Control
 	input			clock;				// 40 MHz clock
-	input			gbl_reset;			// Global reset
+	input			global_reset;		// Global reset
 	input			power_up;			// DLL clock lock, we wait for it
 	input			vme_ready;			// TMB VME registers finished loading with defaults
 	input			start;				// Cycle start command
@@ -266,9 +269,9 @@
 	reg	start_ff     = 0;
 
 	always @(posedge clock) begin
-	power_up_ff		<= power_up;
-	vme_ready_ff	<= vme_ready;
-	start_ff		<= start;
+	power_up_ff  <= power_up;
+	vme_ready_ff <= vme_ready;
+	start_ff     <= start;
 	end
 
 // Signal busy if not idling or waiting for unstart, extend busy to hold off jtagsm to avoid prom contention
@@ -277,52 +280,52 @@
 	wire busy_srl;
 	wire [3:0] bdly = 0;	// busy extend period, 0=25ns
 
-	wire busy_en =  (vme_sm != idle) && (vme_sm != unstart)  && vme_ready_ff;
-	wire nbusy_en= ((vme_sm == idle) || (vme_sm == unstart));
+	wire busy_en  =  (vme_sm != idle) && (vme_sm != unstart)  && vme_ready_ff;
+	wire nbusy_en = ((vme_sm == idle) || (vme_sm == unstart));
 	assign busy_extend	= !nbusy || busy_srl;
 
 	always @(posedge clock) begin
-	busy	<= busy_en;
-	nbusy	<= nbusy_en;
+	busy  <= busy_en;
+	nbusy <= nbusy_en;
 	end
 
 	SRL16E ubusy (.CLK(clock),.CE(1'b1),.D(busy_en),.A0(bdly[0]),.A1(bdly[1]),.A2(bdly[2]),.A3(bdly[3]),.Q(busy_srl));
 
 // Control signals to the active PROM
 	reg	 prom_clk = 0;
-	reg  prom_oe  = 0;
-	reg	 prom_nce = 0;
+	reg  prom_oe  = 1;
+	reg	 prom_nce = 1;
 	wire prom_end;
 
 	wire clear_adr = (vme_sm == reset_adr);
 	wire next_adr  = (vme_sm == latch_prom) && !prom_end;
 	wire idle_prom = (vme_sm == idle) || (vme_sm == unstart);
 
-	always @(posedge clock or posedge gbl_reset) begin
-	if (gbl_reset) begin
-	prom_clk = 0;
-	prom_oe  = 1;
-	prom_nce = 1;
+	always @(posedge clock) begin
+	if (global_reset) begin
+	prom_clk <= 0;
+	prom_oe  <= 1;
+	prom_nce <= 1;
 	end
 	else if (clear_adr) begin
-	prom_clk = 0;	// take clock low, it was prolly idle high
-	prom_oe	 = 0;	// 0=reset address, outputs disabled
-	prom_nce = 0;	// 0=chip selected
+	prom_clk <= 0;	// take clock low, it was prolly idle high
+	prom_oe	 <= 0;	// 0=reset address, outputs disabled
+	prom_nce <= 0;	// 0=chip selected
 	end
 	else if (idle_prom) begin
-	prom_clk = 0;	// take clk low for idling
-	prom_oe	 = 1;	// 0=reset address, outputs disabled
-	prom_nce = 1;	// 1=chip not selected
+	prom_clk <= 0;	// take clk low for idling
+	prom_oe	 <= 1;	// 0=reset address, outputs disabled
+	prom_nce <= 1;	// 1=chip not selected
 	end
 	else if (next_adr) begin
-	prom_clk = 1;	// advance address
-	prom_oe	 = 1;	// 1=outputs enabled
-	prom_nce = 0;	// 0=chip selected
+	prom_clk <= 1;	// advance address
+	prom_oe	 <= 1;	// 1=outputs enabled
+	prom_nce <= 0;	// 0=chip selected
 	end
 	else begin
-	prom_clk = 0;	// take clk low 
-	prom_oe	 = 1;	// 0=reset address, outputs disabled
-	prom_nce = 0;	// 1=chip not selected
+	prom_clk <= 0;	// take clk low 
+	prom_oe	 <= 1;	// 0=reset address, outputs disabled
+	prom_nce <= 0;	// 1=chip not selected
 	end
 	end
 
@@ -330,17 +333,17 @@
 	reg [7:0]	prom_data_ff = 0;
 	reg [15:0]	prom_adr     = 0;
 
-	wire blank_data = !((vme_sm == latch_prom) || (vme_sm == inc_adr) || (vme_sm == persist));
-	wire latch_prom_data = (vme_sm==latch_prom);
+	wire blank_data      = !((vme_sm == latch_prom) || (vme_sm == inc_adr) || (vme_sm == persist));
+	wire latch_prom_data =   (vme_sm == latch_prom);
 	
 	always @(posedge clock) begin
-	if(blank_data) begin
-	prom_data_ff	= 0;
-	prom_adr		=-1;
+	if (blank_data) begin
+	prom_data_ff	<=  0;
+	prom_adr		<= -1;
 	end
-	if(latch_prom_data)begin
-	prom_data_ff	= prom_data;
-	prom_adr		= prom_adr+1;
+	if (latch_prom_data) begin
+	prom_data_ff	<= prom_data;
+	prom_adr		<= prom_adr+1'b1;
 	end
 	end
 
@@ -350,11 +353,11 @@
 	reg	[7:0]	cksum_prom  = 0;
 	wire		clear_status;
 
-	wire wdcnt_en = (vme_sm==latch_prom);
+	wire wdcnt_en = (vme_sm == latch_prom);
 
 	always @(posedge clock) begin
-	if (wdcnt_en    ) wdcnt = wdcnt+1;
-	if (clear_status) wdcnt = 0;
+	if (wdcnt_en    ) wdcnt <= wdcnt+1'b1;
+	if (clear_status) wdcnt <= 0;
 	end
 
 // Decode control word from PROM
@@ -371,11 +374,11 @@
 	reg	 [4:0]	fmt_err  = 0;
 	wire [4:0]	fmt_errors;
 
-	wire check_flag  = (vme_sm==latch_prom);
-	wire abort_clear = (vme_sm == wait_dll) || (vme_sm == wait_vme) || (vme_sm == idle);
+	wire check_flag  = (vme_sm == latch_prom);
+	wire abort_clear = (vme_sm == wait_dll  ) || (vme_sm == wait_vme) || (vme_sm == idle);
 
 	always @(posedge clock) begin
-	if (abort_clear) abort_ff <=0;
+	if (abort_clear) abort_ff <= 0;
 	if (check_flag ) abort_ff <= abort;
 	end
 
@@ -395,7 +398,7 @@
 	wire   check_frame	= (wdcnt    >= 16'h0001) && (prom_adr <= L-3);
 	
 	always @(posedge clock) begin
-	if (clear_status)begin
+	if (clear_status) begin
 	header_begin_marker	<= 0;
 	wdcnt_prom[15:0]	<= 0;
 	header_end_marker	<= 0;
@@ -403,13 +406,13 @@
 	cksum_prom 			<= 0;
 	prom_end_marker		<= 0;
 	end
-	if      (prom_adr == 0)   header_begin_marker<= header_begin;
-	else if (prom_adr == 1)   wdcnt_prom[7:0]	<= prom_data_ff[7:0];
-	else if (prom_adr == 2)   wdcnt_prom[15:8]	<= prom_data_ff[7:0];
-	else if (prom_adr == 15)  header_end_marker	<= header_end;
-	else if (prom_adr == L-3) data_end_marker	<= data_end;
-	else if (prom_adr == L-2) cksum_prom		<= prom_data_ff[7:0];
-	else if (prom_adr == L-1) prom_end_marker	<= prom_end;
+	if      (prom_adr == 0)   header_begin_marker <= header_begin;
+	else if (prom_adr == 1)   wdcnt_prom[7:0]     <= prom_data_ff[7:0];
+	else if (prom_adr == 2)   wdcnt_prom[15:8]    <= prom_data_ff[7:0];
+	else if (prom_adr == 15)  header_end_marker   <= header_end;
+	else if (prom_adr == L-3) data_end_marker     <= data_end;
+	else if (prom_adr == L-2) cksum_prom          <= prom_data_ff[7:0];
+	else if (prom_adr == L-1) prom_end_marker     <= prom_end;
 	end
 
 // Extract VME address and data
@@ -417,12 +420,12 @@
 	reg	[15:0]	data_ff   = 0;
 	reg [2:0]	block_cnt = 0;
 
-	wire adr_clear	=((vme_sm == latch_prom) &&(block_cnt == 4)) || !data_frame;
+	wire adr_clear	=((vme_sm == latch_prom) && (block_cnt == 4)) || !data_frame;
 	wire adr_en		= (vme_sm == latch_prom) && data_frame;
 
 	always @(posedge clock) begin
-	if		(adr_clear)	block_cnt = 0;
-	else if (adr_en)	block_cnt = block_cnt+1;
+	if		(adr_clear)	block_cnt <= 0;
+	else if (adr_en)	block_cnt <= block_cnt+1'b1;
 	end
 
 	always @(posedge clock) begin
@@ -445,23 +448,23 @@
 	reg			adr_getset_ff   = 0;
 	reg	[1:0]	adr_persist_cnt = 0;
 
-	wire adr_getset =((vme_sm == latch_prom) && (block_cnt == 4)) && data_frame;
-	wire adr_go     =(block_cnt == 0);
+	wire adr_getset = ((vme_sm == latch_prom) && (block_cnt == 4)) && data_frame;
+	wire adr_go     = (block_cnt == 0);
 
 	always @(posedge clock) begin
 	adr_getset_ff <= adr_getset;				// get ready to send adr if block_cnt reached 4	
 	end
 
-	wire adr_send = adr_getset_ff && adr_go;	// send adr when block_cnt turns over to 0 from 4
+	wire adr_send    = adr_getset_ff && adr_go;	// send adr when block_cnt turns over to 0 from 4
 	wire adr_persist = adr_persist_cnt < 3;		// adr and data assert 4 clocks wide, 1 clock before ds0
 	
 	always @(posedge clock) begin
-	if(adr_send || clear_status) adr_persist_cnt = 0;
-	else if (adr_persist) adr_persist_cnt = adr_persist_cnt+1;
+	if      (adr_send || clear_status) adr_persist_cnt <= 0;
+	else if (adr_persist             ) adr_persist_cnt <= adr_persist_cnt+1'b1;
 	end
 
 	always @(posedge clock) begin
-	if(adr_send) begin
+	if (adr_send) begin
 	adr		<= adr_ff;
 	data	<= data_ff;
 	ds0		<= 1;
@@ -476,8 +479,8 @@
 	wire blank_oe = clear_status || abort || (vme_sm == idle) || (vme_sm == unstart);
 	
 	always @(posedge clock) begin
-	if(blank_oe)			vmesm_oe	<= 0;	// release prom bus on clear or abort
-	else if (data_frame)	vmesm_oe	<= 1;	// oe asserts during data frames and holds past last ds0
+	if      (blank_oe  ) vmesm_oe <= 0;	// release prom bus on clear or abort
+	else if (data_frame) vmesm_oe <= 1;	// oe asserts during data frames and holds past last ds0
 	end
 
 // Checksum accumulator adds data starting from BC marker to the last VME data frame, inclusive
@@ -486,30 +489,37 @@
 	wire cksum_cnt_en = check_flag && check_frame;
 
 	always @(posedge clock) begin
-	if (cksum_cnt_en) cksum = cksum + prom_data_ff;
-	if (clear_status) cksum = 0;
+	if (cksum_cnt_en) cksum <= cksum + prom_data_ff;
+	if (clear_status) cksum <= 0;
 	end
 
 // Init delay counter waits 2uS after asserting /CE low per Xilinx datasheet
+	`ifdef DEBUG_VMESM 
+	`define MXINIT 4 		// Short cycle for simulation
+	`else
+	`define MXINIT 80 		// 2uS for normal PROM access
+	`endif
+	initial $display ("vmesm: setting PROM access %d",`MXINIT);
+
 	reg [6:0] init_cnt = 0;
 
-	wire init_cnt_en = (vme_sm  == init);
-	wire init_done   = (init_cnt == 80);
+	wire init_cnt_en = (vme_sm   == init  );
+	wire init_done   = (init_cnt ==`MXINIT);
 
 	always @(posedge clock) begin
-	if (init_cnt_en) init_cnt = init_cnt+1;
-	else init_cnt = 0;
+	if (init_cnt_en) init_cnt <= init_cnt+1'b1;
+	else             init_cnt <= 0;
 	end
 
 // Address reset delay counter asserts reset 250nS per Xilinx datasheet
 	reg [3:0] reset_cnt = 0;
 
-	wire reset_cnt_en = (vme_sm == reset_adr);
+	wire reset_cnt_en = (vme_sm    == reset_adr);
 	wire reset_done   = (reset_cnt == 10);
 
 	always @(posedge clock) begin
-	if (reset_cnt_en) reset_cnt = reset_cnt+1;
-	else reset_cnt = 0;
+	if (reset_cnt_en) reset_cnt <= reset_cnt+1'b1;
+	else              reset_cnt <= 0;
 	end
 
 // PROM-read speed throttle
@@ -525,8 +535,8 @@
 	wire throttle_cnt_en = (vme_sm == persist);
 
 	always @(posedge clock) begin
-	if (throttle_cnt_en)throttle_cnt = throttle_cnt+1;
-	else				throttle_cnt = 0;
+	if (throttle_cnt_en) throttle_cnt <= throttle_cnt+1'b1;
+	else                 throttle_cnt <= 0;
 	end
 
 	wire throttle_done = (throttle_cnt == throttle_ff);
@@ -541,7 +551,7 @@
 	assign fmt_errors[1] = !header_end_marker;
 	assign fmt_errors[2] = !data_end_marker;
 	assign fmt_errors[3] = !prom_end_marker;
-	assign fmt_errors[4] = wdcnt_ovf;
+	assign fmt_errors[4] =  wdcnt_ovf;
 	
 	wire latch_status = (vme_sm == unstart);
 
@@ -566,56 +576,56 @@
 	reg [7:0] nvme_writes = 0;
 	
 	always @(posedge clock) begin
-	if (adr_send    ) nvme_writes=nvme_writes+1;
-	if (clear_status) nvme_writes=0;
+	if (adr_send    ) nvme_writes <= nvme_writes+1'b1;
+	if (clear_status) nvme_writes <= 0;
 	end
 
 //--------------------------------------------------------------------------------------------
 //  PROM-Reader State machine
 //--------------------------------------------------------------------------------------------
 	always @(posedge clock) begin
-	if		(gbl_reset)	vme_sm = wait_dll;
-	else if	(sreset)	vme_sm = idle;
+	if		(global_reset) vme_sm <= wait_dll;
+	else if	(sreset)       vme_sm <= idle;
 	else begin
 
 	case (vme_sm)
 	
 	wait_dll:										// Wait for FPGA DLLs to lock
-	 if (power_up_ff)	vme_sm = wait_vme;			// FPGA is ready
+	 if (power_up_ff)	vme_sm <= wait_vme;			// FPGA is ready
 
 	wait_vme:										// Wait for VME registers to load
 	 if (vme_ready_ff)								// VME defaults loaded from FFs
 	 begin
-	 if (autostart)		vme_sm = init;				// Start cycle if autostart enabled
-	 else				vme_sm = idle;				// Otherwise stay idle
+	 if (autostart)		vme_sm <= init;				// Start cycle if autostart enabled
+	 else				vme_sm <= idle;				// Otherwise stay idle
 	 end
 
 	idle:											// Wait for VME command to program, power down PROM
-	 if (start_ff)		vme_sm = init;				// Start arrived
+	 if (start_ff)		vme_sm <= init;				// Start arrived
 
 	init:
-	 if (init_done)		vme_sm = reset_adr;			// Power up PROM, 2uS delay
+	 if (init_done)		vme_sm <= reset_adr;		// Power up PROM, 2uS delay
 
 	reset_adr:
-	 if (reset_done)	vme_sm = prom_taccess;		// Reset PROM address, 250nS delay
+	 if (reset_done)	vme_sm <= prom_taccess;		// Reset PROM address, 250nS delay
 	
-	prom_taccess:		vme_sm = latch_prom;		// Relase reset, wait for output to assert 10ns minimum
+	prom_taccess:		vme_sm <= latch_prom;		// Relase reset, wait for output to assert 10ns minimum
 
-	latch_prom:			vme_sm = inc_adr;			// Latch PROM data
+	latch_prom:			vme_sm <= inc_adr;			// Latch PROM data
 
 	inc_adr:										// Increment PROM address
-	 if (prom_end)		vme_sm = unstart;			// First-word marker missing or hit end of PROM data
+	 if (prom_end)		vme_sm <= unstart;			// First-word marker missing or hit end of PROM data
 	 else 
-	 if (throttle_en)	vme_sm = persist;			// PROM reads at slower speed
-	 else				vme_sm = latch_prom;		// PROM reads at full speed
+	 if (throttle_en)	vme_sm <= persist;			// PROM reads at slower speed
+	 else				vme_sm <= latch_prom;		// PROM reads at full speed
 
 	persist:
-	 if (throttle_done)	vme_sm = latch_prom;		// PROM read-speed decrease
+	 if (throttle_done)	vme_sm <= latch_prom;		// PROM read-speed decrease
 
 	unstart:
-	 if(!start_ff)		vme_sm = idle;				// Wait for VME write command to go away
+	 if(!start_ff)		vme_sm <= idle;				// Wait for VME write command to go away
 
-	default				vme_sm = wait_dll;
+	default				vme_sm <= wait_dll;
 	endcase
 	end
 	end

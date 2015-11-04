@@ -4,8 +4,9 @@
 //	Generates pseudo-random patterns
 //	From Xilinx xapp210
 //----------------------------------------------------------------------------------------------------------------
-// 01/20/09 Mod for 56-bit alct data path
-// 02/24/09 Mod for 49-bit alct data path
+//	01/20/09 Mod for 56-bit alct data path
+//	02/24/09 Mod for 49-bit alct data path
+//	07/26/10 Port to ise 12
 //----------------------------------------------------------------------------------------------------------------
 	module alct_lfsr_rng(clock,ce,reset,lfsr);
 
